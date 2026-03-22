@@ -20,6 +20,7 @@ class TilingController: ObservableObject {
     private var engine = DwindleLayout()
     private let windowTracker: WindowTracker
     private var managedWindowIDs: Set<WindowID> = []
+    private var floatingWindowIDs: Set<WindowID> = []
     private var cancellables: Set<AnyCancellable> = []
     private var retileWorkItem: DispatchWorkItem?
 
@@ -75,8 +76,13 @@ class TilingController: ObservableObject {
                 .map { $0.windowID }
         )
 
-        // Insert new windows
-        let newWindows = currentTileable.subtracting(managedWindowIDs)
+        // Clean up floating windows that are no longer present
+        floatingWindowIDs = floatingWindowIDs.intersection(currentTileable)
+
+        // Insert new windows (skip floating ones)
+        let newWindows = currentTileable
+            .subtracting(managedWindowIDs)
+            .subtracting(floatingWindowIDs)
         for windowID in newWindows.sorted() {
             engine.insertWindow(windowID, afterFocused: windowTracker.focusedWindowID)
             managedWindowIDs.insert(windowID)
@@ -159,6 +165,54 @@ class TilingController: ObservableObject {
         guard let windowInfo = windowTracker.trackedWindows[neighborID] else { return }
 
         windowInfo.axElement.focusWindow()
+    }
+
+    // MARK: - Window Operations
+
+    /// Swap the focused window with its neighbor in the given direction.
+    func swapDirection(_ direction: Direction) {
+        guard let focused = windowTracker.focusedWindowID,
+              managedWindowIDs.contains(focused) else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = engine.calculateFrames(in: screenRect, gaps: GapConfig())
+
+        guard let neighborID = engine.neighbor(of: focused, direction: direction, frames: result) else { return }
+
+        engine.swapWindows(focused, neighborID)
+        retile()
+    }
+
+    /// Resize the split ratio at the focused window's split point.
+    func resizeFocusedSplit(delta: CGFloat) {
+        guard let focused = windowTracker.focusedWindowID,
+              managedWindowIDs.contains(focused) else { return }
+
+        engine.resizeSplit(at: focused, delta: delta)
+        retile()
+    }
+
+    /// Toggle floating for the focused window.
+    /// Float: remove from engine, window stays at its current position.
+    /// Un-float: re-insert into engine at the current focus point.
+    func toggleFloat() {
+        guard let focused = windowTracker.focusedWindowID else { return }
+
+        if floatingWindowIDs.contains(focused) {
+            // Un-float: re-insert into engine
+            floatingWindowIDs.remove(focused)
+            engine.insertWindow(focused, afterFocused: windowTracker.focusedWindowID)
+            managedWindowIDs.insert(focused)
+            logger.debug("Un-floated window \(focused)")
+            retile()
+        } else if managedWindowIDs.contains(focused) {
+            // Float: remove from engine
+            engine.removeWindow(focused)
+            managedWindowIDs.remove(focused)
+            floatingWindowIDs.insert(focused)
+            logger.debug("Floated window \(focused)")
+            retile()
+        }
     }
 
     // MARK: - Debounce
