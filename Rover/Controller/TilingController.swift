@@ -207,6 +207,16 @@ class TilingController: ObservableObject {
             windowTracker.trackedWindows[windowID]?.refresh()
         }
 
+        // Prune windows with invalid AX elements (destroyed but not yet removed
+        // due to async notification timing)
+        let invalidIDs = windowTracker.trackedWindows.values
+            .filter { $0.axElement.role == nil }
+            .map { $0.windowID }
+        for wid in invalidIDs {
+            windowTracker.trackedWindows.removeValue(forKey: wid)
+            logger.debug("Pruned invalid window \(wid)")
+        }
+
         let currentTileable = Set(
             windowTracker.trackedWindows.values
                 .filter { $0.isTileable && !$0.isExcluded }

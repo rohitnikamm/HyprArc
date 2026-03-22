@@ -224,6 +224,10 @@ class WindowTracker: ObservableObject {
 
     private func removeWindow(element: AXUIElement) {
         guard let wid = element.windowID else { return }
+        removeWindow(windowID: wid)
+    }
+
+    private func removeWindow(windowID wid: CGWindowID) {
         if let info = trackedWindows.removeValue(forKey: wid) {
             logger.debug("Untracked window: \(info.title) [\(wid)]")
         }
@@ -249,15 +253,17 @@ class WindowTracker: ObservableObject {
     // MARK: - AX Notification Handling
 
     nonisolated func handleAXNotification(
-        _ notification: String, element: AXUIElement, pid: pid_t, bundleID: String?
+        _ notification: String, element: AXUIElement, pid: pid_t, bundleID: String?,
+        windowID: CGWindowID? = nil
     ) {
         Task { @MainActor in
-            self._handleAXNotification(notification, element: element, pid: pid, bundleID: bundleID)
+            self._handleAXNotification(notification, element: element, pid: pid, bundleID: bundleID, windowID: windowID)
         }
     }
 
     private func _handleAXNotification(
-        _ notification: String, element: AXUIElement, pid: pid_t, bundleID: String?
+        _ notification: String, element: AXUIElement, pid: pid_t, bundleID: String?,
+        windowID: CGWindowID? = nil
     ) {
         switch notification {
         case kAXCreatedNotification:
@@ -270,7 +276,11 @@ class WindowTracker: ObservableObject {
             }
 
         case kAXUIElementDestroyedNotification:
-            removeWindow(element: element)
+            // Use pre-extracted windowID (extracted synchronously in C callback
+            // before async dispatch, since element may be invalid by now)
+            if let wid = windowID ?? element.windowID {
+                removeWindow(windowID: wid)
+            }
 
         case kAXFocusedWindowChangedNotification:
             updateFocusedWindow()
@@ -335,10 +345,22 @@ nonisolated private func axObserverCallback(
 ) {
     guard let refcon else { return }
     let context = Unmanaged<ObserverContext>.fromOpaque(refcon).takeUnretainedValue()
+
+    // Extract windowID synchronously for destruction notifications —
+    // the element may become invalid after async dispatch to MainActor
+    var extractedWindowID: CGWindowID?
+    if (notification as String) == kAXUIElementDestroyedNotification {
+        var wid: CGWindowID = 0
+        if _AXUIElementGetWindow(element, &wid) == .success {
+            extractedWindowID = wid
+        }
+    }
+
     context.tracker?.handleAXNotification(
         notification as String,
         element: element,
         pid: context.pid,
-        bundleID: context.bundleID
+        bundleID: context.bundleID,
+        windowID: extractedWindowID
     )
 }
