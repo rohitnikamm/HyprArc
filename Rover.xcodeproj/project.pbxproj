@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		AA0000012F6F5800001A6C50 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 309A9E042F6F57FC001A6C50 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 309A9E0B2F6F57FC001A6C50;
+			remoteInfo = Rover;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		309A9E0C2F6F57FC001A6C50 /* Rover.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Rover.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000022F6F5800001A6C50 /* RoverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RoverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = Rover;
 			sourceTree = "<group>";
 		};
+		AA0000032F6F5800001A6C50 /* RoverTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RoverTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		309A9E092F6F57FC001A6C50 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000042F6F5800001A6C50 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				309A9E0E2F6F57FC001A6C50 /* Rover */,
+				AA0000032F6F5800001A6C50 /* RoverTests */,
 				309A9E0D2F6F57FC001A6C50 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				309A9E0C2F6F57FC001A6C50 /* Rover.app */,
+				AA0000022F6F5800001A6C50 /* RoverTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,26 @@
 			productReference = 309A9E0C2F6F57FC001A6C50 /* Rover.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA0000052F6F5800001A6C50 /* RoverTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00000A2F6F5800001A6C50 /* Build configuration list for PBXNativeTarget "RoverTests" */;
+			buildPhases = (
+				AA0000062F6F5800001A6C50 /* Sources */,
+				AA0000042F6F5800001A6C50 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0000072F6F5800001A6C50 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000032F6F5800001A6C50 /* RoverTests */,
+			);
+			name = RoverTests;
+			productName = RoverTests;
+			productReference = AA0000022F6F5800001A6C50 /* RoverTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +127,10 @@
 				TargetAttributes = {
 					309A9E0B2F6F57FC001A6C50 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					AA0000052F6F5800001A6C50 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = 309A9E0B2F6F57FC001A6C50;
 					};
 				};
 			};
@@ -100,6 +149,7 @@
 			projectRoot = "";
 			targets = (
 				309A9E0B2F6F57FC001A6C50 /* Rover */,
+				AA0000052F6F5800001A6C50 /* RoverTests */,
 			);
 		};
 /* End PBXProject section */
@@ -122,7 +172,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000062F6F5800001A6C50 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0000072F6F5800001A6C50 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 309A9E0B2F6F57FC001A6C50 /* Rover */;
+			targetProxy = AA0000012F6F5800001A6C50 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		309A9E152F6F57FD001A6C50 /* Debug */ = {
@@ -311,6 +376,46 @@
 			};
 			name = Release;
 		};
+		AA0000082F6F5800001A6C50 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 26H5KWS9TD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rohit.RoverTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Rover.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Rover";
+			};
+			name = Debug;
+		};
+		AA0000092F6F5800001A6C50 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 26H5KWS9TD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rohit.RoverTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Rover.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Rover";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -328,6 +433,15 @@
 			buildConfigurations = (
 				309A9E182F6F57FD001A6C50 /* Debug */,
 				309A9E192F6F57FD001A6C50 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA00000A2F6F5800001A6C50 /* Build configuration list for PBXNativeTarget "RoverTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000082F6F5800001A6C50 /* Debug */,
+				AA0000092F6F5800001A6C50 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

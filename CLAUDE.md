@@ -74,5 +74,6 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 
 - **Phase 1**: Menu bar app + AX permissions ✅
 - **Phase 2**: Window detection & tracking ✅
-- **Phase 3**: Dwindle layout engine (pure geometry) ← next
-- **Phase 4–10**: Controller, focus nav, operations, master-stack, workspaces, hotkeys, config
+- **Phase 3**: Dwindle layout engine + 35 unit tests ✅
+- **Phase 4**: Tiling controller (AX → engine) ← next
+- **Phase 5–10**: Focus nav, operations, master-stack, workspaces, hotkeys, config
