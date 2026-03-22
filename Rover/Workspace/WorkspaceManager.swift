@@ -13,8 +13,9 @@ class WorkspaceManager: ObservableObject {
     private let windowTracker: WindowTracker
     private let logger = Logger(subsystem: "rohit.Rover", category: "WorkspaceManager")
 
-    /// Position window's top-left at the screen's bottom-right corner.
-    /// Window body extends off-screen below and to the right.
+    /// Position window at screen's bottom-right corner. Windows keep their
+    /// original size — body extends off-screen, only 1px origin on-screen.
+    /// macOS won't clamp this (origin is technically on-screen).
     static var offscreenPoint: CGPoint {
         let screen = NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
         return CGPoint(x: screen.maxX - 1, y: screen.maxY - 1)
@@ -35,10 +36,10 @@ class WorkspaceManager: ObservableObject {
     func switchToWorkspace(_ id: Int) {
         guard id != activeWorkspaceID, (1...9).contains(id) else { return }
 
-        // Hide current workspace windows: shrink to 1x1 then move to corner
+        // Hide current workspace windows: move offscreen, keep size to preserve
+        // rendered content (avoids re-render flicker on switch back)
         for windowID in activeWorkspace.allWindowIDs {
             guard let info = windowTracker.trackedWindows[windowID] else { continue }
-            info.axElement.setSize(CGSize(width: 1, height: 1))
             info.axElement.setPosition(Self.offscreenPoint)
         }
 
@@ -68,7 +69,6 @@ class WorkspaceManager: ObservableObject {
 
         // Hide the window (it's now on an inactive workspace)
         if let info = windowTracker.trackedWindows[windowID] {
-            info.axElement.setSize(CGSize(width: 1, height: 1))
             info.axElement.setPosition(Self.offscreenPoint)
         }
 

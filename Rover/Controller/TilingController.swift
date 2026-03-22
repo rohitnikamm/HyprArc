@@ -167,7 +167,6 @@ class TilingController: ObservableObject {
                 // Hide offscreen if target workspace is not active
                 if targetID != workspaceManager.activeWorkspaceID {
                     if let info = windowTracker.trackedWindows[windowID] {
-                        info.axElement.setSize(CGSize(width: 1, height: 1))
                         info.axElement.setPosition(WorkspaceManager.offscreenPoint)
                     }
                 }
@@ -251,7 +250,6 @@ class TilingController: ObservableObject {
                 }
                 // Hide offscreen since it's on an inactive workspace
                 if let info = windowTracker.trackedWindows[windowID] {
-                    info.axElement.setSize(CGSize(width: 1, height: 1))
                     info.axElement.setPosition(WorkspaceManager.offscreenPoint)
                 }
             } else {
@@ -434,7 +432,33 @@ class TilingController: ObservableObject {
     func switchToWorkspace(_ id: Int) {
         workspaceManager.switchToWorkspace(id)
         activeWorkspaceID = workspaceManager.activeWorkspaceID
-        retile()
+
+        let ws = workspaceManager.activeWorkspace
+        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: currentGaps)
+
+        // Pass 1: Resize only windows that need it (while still offscreen).
+        // Windows that kept their size have content already rendered — no re-render needed.
+        for (windowID, frame) in result.frames {
+            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
+            let currentSize = windowInfo.axElement.size
+            if currentSize == nil
+                || abs(currentSize!.width - frame.size.width) > 1
+                || abs(currentSize!.height - frame.size.height) > 1 {
+                windowInfo.axElement.setSize(frame.size)
+            }
+        }
+
+        // Pass 2: Move all to correct positions (instant appear with content intact)
+        lastAppliedFrames.removeAll()
+        for (windowID, frame) in result.frames {
+            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
+            windowInfo.axElement.setPosition(frame.origin)
+            lastAppliedFrames[windowID] = frame
+        }
     }
 
     func moveWindowToWorkspace(_ targetID: Int) {
