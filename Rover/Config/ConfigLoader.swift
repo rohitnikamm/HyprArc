@@ -13,6 +13,8 @@ class ConfigLoader: ObservableObject {
 
     private var fileWatcher: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
+    private var isSaving = false
+    private var saveWorkItem: DispatchWorkItem?
     private let logger = Logger(subsystem: "rohit.Rover", category: "ConfigLoader")
 
     // MARK: - Load
@@ -26,13 +28,44 @@ class ConfigLoader: ObservableObject {
             return
         }
 
-        config = TOMLParser.parse(contents)
+        let newConfig = TOMLParser.parse(contents)
+        if newConfig != config {
+            config = newConfig
+        }
         logger.debug("Config loaded: gaps=\(self.config.gaps.inner)/\(self.config.gaps.outer), layout=\(self.config.general.defaultLayout)")
     }
 
     /// Force reload from disk.
     func reload() {
         load()
+    }
+
+    /// Reset all settings to their default values and save to disk.
+    func resetToDefaults() {
+        config = .default
+        save()
+    }
+
+    // MARK: - Save
+
+    /// Debounced save: updates disk 200ms after the last call.
+    /// The in-memory config is already updated by the caller.
+    func save() {
+        saveWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let toml = TOMLSerializer.serialize(self.config)
+            self.createDefaultIfNeeded()
+            self.isSaving = true
+            try? toml.write(toFile: Self.configPath, atomically: true, encoding: .utf8)
+            self.logger.debug("Config saved to disk")
+            // Reset after the file-watcher debounce window (300ms) has passed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.isSaving = false
+            }
+        }
+        saveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
     }
 
     // MARK: - Default Config
@@ -73,8 +106,9 @@ class ConfigLoader: ObservableObject {
         source.setEventHandler { [weak self] in
             // Debounce: editors often write multiple times in quick succession
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self?.load()
-                self?.logger.debug("Config reloaded (file changed)")
+                guard let self, !self.isSaving else { return }
+                self.load()
+                self.logger.debug("Config reloaded (file changed)")
             }
         }
 

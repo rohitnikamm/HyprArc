@@ -22,6 +22,8 @@ struct SplitNode: Sendable {
 /// width > height → horizontal (side by side), otherwise vertical (stacked).
 struct DwindleLayout: TilingEngine {
     private(set) var root: DwindleNode?
+    /// Default ratio for new split nodes (0.1–0.9). Configurable via config.
+    var defaultSplitRatio: CGFloat = 0.5
 
     var windowIDs: [WindowID] {
         guard let root else { return [] }
@@ -58,7 +60,7 @@ struct DwindleLayout: TilingEngine {
                 // Split this leaf: existing becomes first, new becomes second
                 return .split(SplitNode(
                     direction: .horizontal,  // Placeholder — recalculated in calculateFrames
-                    ratio: 0.5,
+                    ratio: defaultSplitRatio,
                     first: .leaf(wid),
                     second: .leaf(newWindow)
                 ))

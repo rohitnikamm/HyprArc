@@ -36,7 +36,26 @@ class TilingController: ObservableObject {
     init(windowTracker: WindowTracker, configLoader: ConfigLoader) {
         self.windowTracker = windowTracker
         self.configLoader = configLoader
-        self.workspaceManager = WorkspaceManager(windowTracker: windowTracker)
+        self.workspaceManager = WorkspaceManager(
+            windowTracker: windowTracker,
+            defaultEngine: Self.makeEngine(from: configLoader.config)
+        )
+        self.layoutName = configLoader.config.general.defaultLayout == "master-stack"
+            ? "Master-Stack" : "Dwindle"
+    }
+
+    /// Build a layout engine from the current config.
+    private static func makeEngine(from config: RoverConfig) -> any TilingEngine {
+        if config.general.defaultLayout == "master-stack" {
+            var engine = MasterStackLayout()
+            engine.masterRatio = config.masterStack.masterRatio
+            engine.orientation = MasterOrientation(string: config.masterStack.orientation)
+            return engine
+        } else {
+            var engine = DwindleLayout()
+            engine.defaultSplitRatio = config.dwindle.defaultSplitRatio
+            return engine
+        }
     }
 
     // MARK: - Lifecycle
@@ -59,7 +78,8 @@ class TilingController: ObservableObject {
         // Reload on config changes
         configLoader.$config
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] config in
+                self?.applyConfigChanges(config)
                 self?.scheduleSync()
             }
             .store(in: &cancellables)
@@ -81,6 +101,46 @@ class TilingController: ObservableObject {
     func stop() {
         cancellables.removeAll()
         retileWorkItem?.cancel()
+    }
+
+    // MARK: - Config Application
+
+    /// Apply layout and engine settings from config to all workspaces.
+    private func applyConfigChanges(_ config: RoverConfig) {
+        let wantsMasterStack = config.general.defaultLayout == "master-stack"
+        let currentIsMasterStack = workspaceManager.activeWorkspace.engine is MasterStackLayout
+
+        // Switch layout if the configured default changed
+        if wantsMasterStack != currentIsMasterStack {
+            for i in workspaceManager.workspaces.indices {
+                let currentWindows = workspaceManager.workspaces[i].engine.windowIDs
+                workspaceManager.workspaces[i].engine = Self.makeEngine(from: config)
+                for id in currentWindows {
+                    workspaceManager.workspaces[i].engine.insertWindow(id, afterFocused: nil)
+                }
+            }
+            layoutName = wantsMasterStack ? "Master-Stack" : "Dwindle"
+        }
+
+        // Update engine-specific settings on all workspaces
+        for i in workspaceManager.workspaces.indices {
+            if var dwindle = workspaceManager.workspaces[i].engine as? DwindleLayout {
+                dwindle.defaultSplitRatio = config.dwindle.defaultSplitRatio
+                workspaceManager.workspaces[i].engine = dwindle
+            } else if var master = workspaceManager.workspaces[i].engine as? MasterStackLayout {
+                master.masterRatio = config.masterStack.masterRatio
+                master.orientation = MasterOrientation(string: config.masterStack.orientation)
+                workspaceManager.workspaces[i].engine = master
+            }
+        }
+    }
+
+    /// Check if a window should be auto-floated based on window rules.
+    private func shouldFloat(bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return configLoader.config.windowRules.contains { rule in
+            rule.action == "float" && rule.appID == bundleID
+        }
     }
 
     // MARK: - Sync & Retile
@@ -114,10 +174,16 @@ class TilingController: ObservableObject {
         let newWindows = currentTileable
             .subtracting(allManaged)
         for windowID in newWindows.sorted() {
-            workspaceManager.activeWorkspace.engine.insertWindow(
-                windowID, afterFocused: windowTracker.focusedWindowID)
-            workspaceManager.activeWorkspace.windowIDs.insert(windowID)
-            logger.debug("Inserted window \(windowID) into workspace \(self.workspaceManager.activeWorkspaceID)")
+            let bundleID = windowTracker.trackedWindows[windowID]?.bundleID
+            if shouldFloat(bundleID: bundleID) {
+                workspaceManager.activeWorkspace.floatingWindowIDs.insert(windowID)
+                logger.debug("Auto-floated window \(windowID) (window rule)")
+            } else {
+                workspaceManager.activeWorkspace.engine.insertWindow(
+                    windowID, afterFocused: windowTracker.focusedWindowID)
+                workspaceManager.activeWorkspace.windowIDs.insert(windowID)
+                logger.debug("Inserted window \(windowID) into workspace \(self.workspaceManager.activeWorkspaceID)")
+            }
         }
 
         // Remove gone windows from whichever workspace owns them

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// All commands that can be triggered by hotkeys.
 enum TilingCommand: Sendable {
@@ -16,54 +17,91 @@ enum TilingCommand: Sendable {
 @MainActor
 class CommandDispatcher {
     private let tilingController: TilingController
+    private let configLoader: ConfigLoader
     private var bindings: [KeyBinding: TilingCommand] = [:]
+    private var cancellables: Set<AnyCancellable> = []
 
-    init(tilingController: TilingController) {
+    /// Called when bindings change — HotkeyManager subscribes to update the event tap context.
+    var onBindingsChanged: ((_ bindings: Set<KeyBinding>) -> Void)?
+
+    init(tilingController: TilingController, configLoader: ConfigLoader) {
         self.tilingController = tilingController
-        registerDefaultBindings()
+        self.configLoader = configLoader
+        loadBindings(from: configLoader.config)
+
+        configLoader.$config
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] config in
+                self?.loadBindings(from: config)
+            }
+            .store(in: &cancellables)
     }
 
-    /// Register Hyprland-inspired default key bindings.
-    private func registerDefaultBindings() {
-        let opt = KeyBinding.ModifierSet.opt
-        let optShift = KeyBinding.ModifierSet.optShift
+    // MARK: - Binding Loading
 
-        // Focus: Opt+H/J/K/L
-        bindings[KeyBinding(keyCode: KeyCode.h, modifiers: opt)] = .focusDirection(.left)
-        bindings[KeyBinding(keyCode: KeyCode.j, modifiers: opt)] = .focusDirection(.down)
-        bindings[KeyBinding(keyCode: KeyCode.k, modifiers: opt)] = .focusDirection(.up)
-        bindings[KeyBinding(keyCode: KeyCode.l, modifiers: opt)] = .focusDirection(.right)
+    /// Rebuild bindings from config. Called on init and config changes.
+    private func loadBindings(from config: RoverConfig) {
+        bindings.removeAll()
 
-        // Swap: Opt+Shift+H/J/K/L
-        bindings[KeyBinding(keyCode: KeyCode.h, modifiers: optShift)] = .swapDirection(.left)
-        bindings[KeyBinding(keyCode: KeyCode.j, modifiers: optShift)] = .swapDirection(.down)
-        bindings[KeyBinding(keyCode: KeyCode.k, modifiers: optShift)] = .swapDirection(.up)
-        bindings[KeyBinding(keyCode: KeyCode.l, modifiers: optShift)] = .swapDirection(.right)
-
-        // Workspaces: Opt+1-9
-        let numberKeys: [UInt16] = [
-            KeyCode.one, KeyCode.two, KeyCode.three,
-            KeyCode.four, KeyCode.five, KeyCode.six,
-            KeyCode.seven, KeyCode.eight, KeyCode.nine,
-        ]
-        for (i, keyCode) in numberKeys.enumerated() {
-            bindings[KeyBinding(keyCode: keyCode, modifiers: opt)] = .switchWorkspace(i + 1)
-            bindings[KeyBinding(keyCode: keyCode, modifiers: optShift)] = .moveToWorkspace(i + 1)
+        for (commandName, keyString) in config.keybindings.bindings {
+            guard let binding = KeyBinding.parse(keyString),
+                  let command = Self.commandForName(commandName) else {
+                continue
+            }
+            bindings[binding] = command
         }
 
-        // Float: Opt+Space
-        bindings[KeyBinding(keyCode: KeyCode.space, modifiers: opt)] = .toggleFloat
-
-        // Layout: Opt+D
-        bindings[KeyBinding(keyCode: KeyCode.d, modifiers: opt)] = .cycleLayout
-
-        // Resize: Opt+Equal/Minus
-        bindings[KeyBinding(keyCode: KeyCode.equal, modifiers: opt)] = .resizeSplit(0.05)
-        bindings[KeyBinding(keyCode: KeyCode.minus, modifiers: opt)] = .resizeSplit(-0.05)
-
-        // Quit: Opt+Shift+E
-        bindings[KeyBinding(keyCode: KeyCode.e, modifiers: optShift)] = .quitRover
+        onBindingsChanged?(Set(bindings.keys))
     }
+
+    // MARK: - Command Name Mapping
+
+    /// Map command name string to TilingCommand.
+    static func commandForName(_ name: String) -> TilingCommand? {
+        switch name {
+        case "focus-left": return .focusDirection(.left)
+        case "focus-down": return .focusDirection(.down)
+        case "focus-up": return .focusDirection(.up)
+        case "focus-right": return .focusDirection(.right)
+        case "swap-left": return .swapDirection(.left)
+        case "swap-down": return .swapDirection(.down)
+        case "swap-up": return .swapDirection(.up)
+        case "swap-right": return .swapDirection(.right)
+        case "toggle-float": return .toggleFloat
+        case "cycle-layout": return .cycleLayout
+        case "resize-grow": return .resizeSplit(0.05)
+        case "resize-shrink": return .resizeSplit(-0.05)
+        case "quit": return .quitRover
+        default:
+            // workspace-N and move-to-workspace-N
+            if name.hasPrefix("workspace-"),
+               let n = Int(name.dropFirst("workspace-".count)), (1...9).contains(n) {
+                return .switchWorkspace(n)
+            }
+            if name.hasPrefix("move-to-workspace-"),
+               let n = Int(name.dropFirst("move-to-workspace-".count)), (1...9).contains(n) {
+                return .moveToWorkspace(n)
+            }
+            return nil
+        }
+    }
+
+    /// All known command names in display order.
+    static let allCommandNames: [String] = [
+        "focus-left", "focus-down", "focus-up", "focus-right",
+        "swap-left", "swap-down", "swap-up", "swap-right",
+        "workspace-1", "workspace-2", "workspace-3",
+        "workspace-4", "workspace-5", "workspace-6",
+        "workspace-7", "workspace-8", "workspace-9",
+        "move-to-workspace-1", "move-to-workspace-2", "move-to-workspace-3",
+        "move-to-workspace-4", "move-to-workspace-5", "move-to-workspace-6",
+        "move-to-workspace-7", "move-to-workspace-8", "move-to-workspace-9",
+        "toggle-float", "cycle-layout",
+        "resize-grow", "resize-shrink",
+        "quit",
+    ]
+
+    // MARK: - Dispatch
 
     /// Try to dispatch a key event. Returns true if the event was handled (should be swallowed).
     func dispatch(keyCode: UInt16, flags: CGEventFlags) -> Bool {

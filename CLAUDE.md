@@ -54,9 +54,9 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 | `TilingEngine/` | Layout algorithms conforming to `TilingEngine` protocol + geometric navigation |
 | `Controller/` | `TilingController` orchestrator + `ScreenHelper` coordinate conversion |
 | `Workspace/` | Virtual workspace management (9 workspaces, hide via offscreen move) |
-| `Hotkeys/` | Global hotkey registration via `CGEvent.tapCreate`, `KeyBinding` model, `CommandDispatcher` |
-| `Config/` | TOML config at `~/.config/rover/config.toml` with hot-reload via `DispatchSource` |
-| `UI/` | `MenuBarView` dropdown + `SettingsView` |
+| `Hotkeys/` | Global hotkey registration via `CGEvent.tapCreate`, `KeyBinding` model (with `parse()`/`toString()` for config strings), `CommandDispatcher` (loads bindings from config) |
+| `Config/` | TOML config at `~/.config/rover/config.toml` with hot-reload via `DispatchSource`, `TOMLSerializer` for saving, `ConfigLoader` with debounced `save()` |
+| `UI/` | `MenuBarView` dropdown, `SettingsView` (tabbed: General, Gaps, Layouts, Keybindings, Window Rules), `SwapOverlayWindow` |
 
 ### Technical Decisions
 
@@ -70,6 +70,12 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Electron ghost window filtering**: `hasCloseButton` check filters out internal "Browser" helper windows from Electron apps (VSCode, Slack, etc.)
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
 - **MenuBarExtra observation**: `@ObservedObject` doesn't work in `RoverApp` via `appDelegate` chain — use a dedicated `MenuBarLabel` View with its own `@ObservedObject` to observe `TilingController`'s `@Published` properties
+- **Settings window**: `Window(id: "settings")` scene alongside `MenuBarExtra`. Two-way sync between UI and config file: UI changes → debounced `save()` (200ms) → write TOML; external file edits → file watcher → `load()` → `@Published` update → SwiftUI re-renders. `isSaving` flag prevents reload loop. Reset to defaults button with confirmation alert.
+- **SwiftUI Binding async pattern**: All `Binding` setters in `SettingsView` wrap `@Published` mutations in `DispatchQueue.main.async` to avoid "Publishing changes from within view updates" warnings. Without this, SwiftUI triggers undefined behavior when Picker/Slider values change.
+- **Config-driven layout**: All config settings are wired up and take effect immediately. `TilingController.applyConfigChanges()` switches layout engines, updates `DwindleLayout.defaultSplitRatio`, `MasterStackLayout.masterRatio`/`orientation` across all workspaces on config change. `WorkspaceManager` accepts a `defaultEngine` parameter for startup.
+- **Window rules**: `syncAndRetile()` checks `configLoader.config.windowRules` when new windows appear — matching bundle IDs with `action = "float"` are auto-floated instead of tiled.
+- **Configurable hotkeys**: `[keybindings]` section in config.toml maps command names to key strings (e.g. `focus-left = "opt+h"`). `KeyBinding.parse()` converts strings ↔ key codes. `CommandDispatcher` loads bindings from config and subscribes to changes. `HotkeyManager` callback uses dynamic `registeredBindings` array (not hardcoded `knownKeys`). Supports `opt`, `shift`, `cmd`, `ctrl` modifiers + all a-z, 0-9, and special keys.
+- **Nonisolated Hashable/Equatable**: `KeyBinding` and `ModifierSet` have explicit `nonisolated` conformances to avoid Swift 6 MainActor isolation conflicts in the CGEvent tap callback.
 - **Mouse resize**: No modifier needed — drag directly on split boundary gap. Uses `retileFast()` (skips constraint checks) + frame-diff tracking (only AX calls for changed windows) for smooth performance
 - **Mouse swap**: No modifier needed — drag from window title bar (top 30px) to another window. Orange translucent overlay (`SwapOverlayWindow`) highlights the target during drag. Uses `DispatchQueue.main.async` (not Task) for low-latency mouse event handling
 
@@ -88,3 +94,4 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 9**: Global hotkeys (CGEvent tap, Hyprland bindings) ✅
 - **Phase 9.5**: Mouse-driven resize (drag boundary) & swap (drag title bar, orange overlay) ✅
 - **Phase 10**: Config system (TOML at `~/.config/rover/config.toml`, hot-reload, 64 total tests) ✅
+- **Phase 10.5**: Settings UI + configurable hotkeys + all config settings wired up (layout switching, split/master ratios, orientation, window rules auto-float) + reset to defaults ✅

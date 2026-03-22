@@ -95,6 +95,9 @@ enum TOMLParser {
             default: break
             }
 
+        case "keybindings":
+            config.keybindings.bindings[key] = value
+
         case "window-rules":
             guard !config.windowRules.isEmpty else { break }
             let idx = config.windowRules.count - 1

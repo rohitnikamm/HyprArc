@@ -3,7 +3,9 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var windowTracker: WindowTracker
     @ObservedObject var tilingController: TilingController
+    var configLoader: ConfigLoader
     @State private var accessibilityGranted = AccessibilityHelper.isTrusted()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -83,6 +85,13 @@ struct MenuBarView: View {
             }
 
             Divider()
+
+            Button {
+                openWindow(id: "settings")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Settings…", systemImage: "gearshape")
+            }
 
             Button("Quit Rover") {
                 NSApplication.shared.terminate(nil)

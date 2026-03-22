@@ -20,9 +20,9 @@ class WorkspaceManager: ObservableObject {
         return CGPoint(x: screen.maxX - 1, y: screen.maxY - 1)
     }
 
-    init(windowTracker: WindowTracker) {
+    init(windowTracker: WindowTracker, defaultEngine: @autoclosure () -> any TilingEngine = DwindleLayout()) {
         self.windowTracker = windowTracker
-        self.workspaces = (1...9).map { Workspace(id: $0) }
+        self.workspaces = (1...9).map { Workspace(id: $0, engine: defaultEngine()) }
     }
 
     var activeWorkspace: Workspace {

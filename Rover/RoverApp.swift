@@ -18,11 +18,18 @@ struct RoverApp: App {
         MenuBarExtra {
             MenuBarView(
                 windowTracker: appDelegate.windowTracker,
-                tilingController: appDelegate.tilingController
+                tilingController: appDelegate.tilingController,
+                configLoader: appDelegate.configLoader
             )
         } label: {
             MenuBarLabel(tilingController: appDelegate.tilingController)
         }
+
+        Window("Rover Settings", id: "settings") {
+            SettingsView(configLoader: appDelegate.configLoader)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }
 
@@ -32,7 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var tilingController = TilingController(
         windowTracker: windowTracker, configLoader: configLoader)
     lazy var hotkeyManager = HotkeyManager(
-        dispatcher: CommandDispatcher(tilingController: tilingController),
+        dispatcher: CommandDispatcher(tilingController: tilingController, configLoader: configLoader),
         tilingController: tilingController
     )
 

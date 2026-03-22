@@ -9,6 +9,7 @@ class HotkeyManager {
     private var runLoopSource: CFRunLoopSource?
     private let dispatcher: CommandDispatcher
     let tilingController: TilingController
+    private var hotkeyContext: HotkeyContext?
 
     private let logger = Logger(subsystem: "rohit.Rover", category: "HotkeyManager")
 
@@ -22,6 +23,13 @@ class HotkeyManager {
             dispatcher: dispatcher,
             tilingController: tilingController
         )
+        hotkeyContext = context
+
+        // Subscribe to binding changes from CommandDispatcher
+        dispatcher.onBindingsChanged = { [weak context] bindings in
+            context?.registeredBindings = Array(bindings)
+        }
+
         let contextPtr = Unmanaged.passRetained(context).toOpaque()
 
         let eventMask: CGEventMask =
@@ -71,6 +79,10 @@ private final class HotkeyContext: @unchecked Sendable {
     let tilingController: TilingController
     var lastDragTime: CFAbsoluteTime = 0
 
+    /// Dynamic list of registered keybindings, updated when config changes.
+    /// Array (not Set) to avoid Hashable conformance in nonisolated context.
+    nonisolated(unsafe) var registeredBindings: [KeyBinding] = []
+
     init(dispatcher: CommandDispatcher, tilingController: TilingController) {
         self.dispatcher = dispatcher
         self.tilingController = tilingController
@@ -95,32 +107,34 @@ nonisolated private func hotkeyCallback(
 
     let context = Unmanaged<HotkeyContext>.fromOpaque(userInfo).takeUnretainedValue()
     let flags = event.flags
-    let hasOpt = flags.contains(.maskAlternate)
-    let hasShift = flags.contains(.maskShift)
 
     // MARK: - Keyboard Events
 
     if type == .keyDown {
-        guard hasOpt else {
+        // Fast guard: at least one modifier must be pressed to match any binding
+        let hasAnyModifier = flags.contains(.maskAlternate)
+            || flags.contains(.maskShift)
+            || flags.contains(.maskCommand)
+            || flags.contains(.maskControl)
+        guard hasAnyModifier else {
             return Unmanaged.passUnretained(event)
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
 
-        Task { @MainActor in
-            _ = context.dispatcher.dispatch(keyCode: keyCode, flags: flags)
+        // Check if this key+modifier matches any registered binding
+        var shouldSwallow = false
+        for binding in context.registeredBindings {
+            if binding.matches(keyCode: keyCode, flags: flags) {
+                shouldSwallow = true
+                break
+            }
         }
 
-        let knownKeys: Set<UInt16> = [
-            KeyCode.h, KeyCode.j, KeyCode.k, KeyCode.l,
-            KeyCode.d, KeyCode.e, KeyCode.space,
-            KeyCode.equal, KeyCode.minus,
-            KeyCode.one, KeyCode.two, KeyCode.three,
-            KeyCode.four, KeyCode.five, KeyCode.six,
-            KeyCode.seven, KeyCode.eight, KeyCode.nine,
-        ]
-
-        if knownKeys.contains(keyCode) {
+        if shouldSwallow {
+            Task { @MainActor in
+                _ = context.dispatcher.dispatch(keyCode: keyCode, flags: flags)
+            }
             return nil
         }
 

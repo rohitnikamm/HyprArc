@@ -3,6 +3,15 @@ import CoreGraphics
 /// Orientation of the master area relative to the stack.
 enum MasterOrientation: Sendable, CaseIterable {
     case left, right, top, bottom
+
+    init(string: String) {
+        switch string {
+        case "right": self = .right
+        case "top": self = .top
+        case "bottom": self = .bottom
+        default: self = .left
+        }
+    }
 }
 
 /// Master-stack layout algorithm.
