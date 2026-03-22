@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// The complete configuration model for Rover.
 struct RoverConfig: Equatable {
@@ -66,9 +67,14 @@ struct RoverConfig: Equatable {
         ]
     }
 
-    struct WindowRule: Equatable {
+    struct WindowRule: Equatable, Identifiable {
+        let id = UUID()
         var appID: String
         var action: String  // "float"
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.appID == rhs.appID && lhs.action == rhs.action
+        }
     }
 
     /// Convert gaps config to the engine's GapConfig type.

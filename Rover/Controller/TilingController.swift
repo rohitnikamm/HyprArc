@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import CoreGraphics
 import os
@@ -453,6 +454,8 @@ class TilingController: ObservableObject {
 
     /// Begin a mouse resize operation.
     func beginResize(at point: CGPoint) {
+        // Don't resize when our own windows (Settings) are focused
+        guard NSApp.keyWindow == nil else { return }
         guard let (windowID, axis) = splitBoundaryAt(point: point) else { return }
         resizingWindowID = windowID
         resizeAxis = axis
@@ -497,6 +500,8 @@ class TilingController: ObservableObject {
 
     /// Begin a mouse swap operation (triggered by clicking on a window's title bar).
     func beginSwap(at point: CGPoint) {
+        // Don't swap when our own windows (Settings) are focused
+        guard NSApp.keyWindow == nil else { return }
         guard let windowID = windowAtTitleBar(point: point) else { return }
         swapSourceWindowID = windowID
         logger.debug("Begin swap from window \(windowID)")

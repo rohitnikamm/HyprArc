@@ -28,7 +28,8 @@ struct RoverApp: App {
         Window("Rover Settings", id: "settings") {
             SettingsView(configLoader: appDelegate.configLoader)
         }
-        .windowResizability(.contentSize)
+        .windowStyle(.automatic)
+        .defaultSize(width: 650, height: 450)
         .defaultPosition(.center)
     }
 }
