@@ -419,7 +419,7 @@ private struct WindowRulesTab: View {
                 ContentUnavailableView(
                     "No Window Rules",
                     systemImage: "list.bullet.rectangle",
-                    description: Text("Add a rule to always float specific apps.")
+                    description: Text("Add a rule to float apps or assign them to workspaces.")
                 )
             } else {
                 ScrollView {
@@ -432,7 +432,17 @@ private struct WindowRulesTab: View {
                                         .textFieldStyle(.roundedBorder)
 
                                     Picker("Action", selection: actionBinding(at: index)) {
+                                        Text("Tile").tag("")
                                         Text("Float").tag("float")
+                                    }
+                                    .labelsHidden()
+                                    .fixedSize()
+
+                                    Picker("Workspace", selection: workspaceBinding(at: index)) {
+                                        Text("Any").tag(0)
+                                        ForEach(1...9, id: \.self) { ws in
+                                            Text("\(ws)").tag(ws)
+                                        }
                                     }
                                     .labelsHidden()
                                     .fixedSize()
@@ -461,13 +471,37 @@ private struct WindowRulesTab: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    withAnimation(.smooth(duration: 0.25)) {
-                        configLoader.config.windowRules.append(
-                            RoverConfig.WindowRule(appID: "", action: "float")
-                        )
+                Menu {
+                    let apps = NSWorkspace.shared.runningApplications
+                        .filter { $0.activationPolicy == .regular
+                            && $0.bundleIdentifier != nil
+                            && $0.bundleIdentifier != "rohit.Rover" }
+                        .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+
+                    ForEach(apps, id: \.bundleIdentifier) { app in
+                        Button {
+                            let bundleID = app.bundleIdentifier ?? ""
+                            withAnimation(.smooth(duration: 0.25)) {
+                                configLoader.config.windowRules.append(
+                                    RoverConfig.WindowRule(appID: bundleID, action: "float")
+                                )
+                            }
+                            configLoader.save()
+                        } label: {
+                            Text("\(app.localizedName ?? "Unknown") — \(app.bundleIdentifier ?? "")")
+                        }
                     }
-                    configLoader.save()
+
+                    Divider()
+
+                    Button("Custom...") {
+                        withAnimation(.smooth(duration: 0.25)) {
+                            configLoader.config.windowRules.append(
+                                RoverConfig.WindowRule(appID: "", action: "float")
+                            )
+                        }
+                        configLoader.save()
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -501,6 +535,22 @@ private struct WindowRulesTab: View {
                 DispatchQueue.main.async {
                     guard index < configLoader.config.windowRules.count else { return }
                     configLoader.config.windowRules[index].action = newValue
+                    configLoader.save()
+                }
+            }
+        )
+    }
+
+    private func workspaceBinding(at index: Int) -> Binding<Int> {
+        Binding(
+            get: {
+                guard index < configLoader.config.windowRules.count else { return 0 }
+                return configLoader.config.windowRules[index].workspace ?? 0
+            },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    guard index < configLoader.config.windowRules.count else { return }
+                    configLoader.config.windowRules[index].workspace = newValue == 0 ? nil : newValue
                     configLoader.save()
                 }
             }

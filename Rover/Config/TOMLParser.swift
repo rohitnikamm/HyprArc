@@ -106,6 +106,10 @@ enum TOMLParser {
                 config.windowRules[idx].appID = value
             case "action":
                 config.windowRules[idx].action = value
+            case "workspace":
+                if let ws = Int(value), (1...9).contains(ws) {
+                    config.windowRules[idx].workspace = ws
+                }
             default: break
             }
 

@@ -49,7 +49,12 @@ enum TOMLSerializer {
                 lines.append("")
                 lines.append("[[window-rules]]")
                 lines.append("app-id = \"\(rule.appID)\"")
-                lines.append("action = \"\(rule.action)\"")
+                if !rule.action.isEmpty {
+                    lines.append("action = \"\(rule.action)\"")
+                }
+                if let workspace = rule.workspace {
+                    lines.append("workspace = \(workspace)")
+                }
             }
         }
 

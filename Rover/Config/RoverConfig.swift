@@ -71,9 +71,10 @@ struct RoverConfig: Equatable {
         let id = UUID()
         var appID: String
         var action: String  // "float"
+        var workspace: Int?  // nil = no assignment, 1-9 = target workspace
 
         static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.appID == rhs.appID && lhs.action == rhs.action
+            lhs.appID == rhs.appID && lhs.action == rhs.action && lhs.workspace == rhs.workspace
         }
     }
 
@@ -150,6 +151,7 @@ struct RoverConfig: Equatable {
         # [[window-rules]]
         # app-id = "com.spotify.client"
         # action = "float"
+        # workspace = 2
         """
     }
 }

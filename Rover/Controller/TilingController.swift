@@ -134,6 +134,47 @@ class TilingController: ObservableObject {
                 workspaceManager.workspaces[i].engine = master
             }
         }
+
+        // Move existing windows to their assigned workspaces (handles rule changes for running apps)
+        for i in workspaceManager.workspaces.indices {
+            let wsID = i + 1
+            let allWindowIDs = workspaceManager.workspaces[i].windowIDs
+                .union(workspaceManager.workspaces[i].floatingWindowIDs)
+            for windowID in allWindowIDs {
+                let bundleID = windowTracker.trackedWindows[windowID]?.bundleID
+                guard let targetID = assignedWorkspace(bundleID: bundleID),
+                      targetID != wsID else { continue }
+
+                // Remove from current workspace
+                let isFloating = workspaceManager.workspaces[i].floatingWindowIDs.contains(windowID)
+                if isFloating {
+                    workspaceManager.workspaces[i].floatingWindowIDs.remove(windowID)
+                } else {
+                    workspaceManager.workspaces[i].engine.removeWindow(windowID)
+                    workspaceManager.workspaces[i].windowIDs.remove(windowID)
+                }
+
+                // Add to target workspace
+                let targetFloat = shouldFloat(bundleID: bundleID)
+                let targetIndex = targetID - 1
+                if targetFloat {
+                    workspaceManager.workspaces[targetIndex].floatingWindowIDs.insert(windowID)
+                } else {
+                    workspaceManager.workspaces[targetIndex].engine.insertWindow(windowID, afterFocused: nil)
+                    workspaceManager.workspaces[targetIndex].windowIDs.insert(windowID)
+                }
+
+                // Hide offscreen if target workspace is not active
+                if targetID != workspaceManager.activeWorkspaceID {
+                    if let info = windowTracker.trackedWindows[windowID] {
+                        info.axElement.setSize(CGSize(width: 1, height: 1))
+                        info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                    }
+                }
+
+                logger.debug("Reassigned window \(windowID) from workspace \(wsID) to \(targetID) (config change)")
+            }
+        }
     }
 
     /// Check if a window should be auto-floated based on window rules.
@@ -142,6 +183,14 @@ class TilingController: ObservableObject {
         return configLoader.config.windowRules.contains { rule in
             rule.action == "float" && rule.appID == bundleID
         }
+    }
+
+    /// Check if a window should be assigned to a specific workspace based on window rules.
+    private func assignedWorkspace(bundleID: String?) -> Int? {
+        guard let bundleID else { return nil }
+        return configLoader.config.windowRules.first { rule in
+            rule.appID == bundleID && rule.workspace != nil
+        }?.workspace
     }
 
     // MARK: - Sync & Retile
@@ -176,14 +225,36 @@ class TilingController: ObservableObject {
             .subtracting(allManaged)
         for windowID in newWindows.sorted() {
             let bundleID = windowTracker.trackedWindows[windowID]?.bundleID
-            if shouldFloat(bundleID: bundleID) {
-                workspaceManager.activeWorkspace.floatingWindowIDs.insert(windowID)
-                logger.debug("Auto-floated window \(windowID) (window rule)")
+            let isFloat = shouldFloat(bundleID: bundleID)
+            let targetWorkspaceID = assignedWorkspace(bundleID: bundleID)
+
+            if let targetID = targetWorkspaceID, targetID != workspaceManager.activeWorkspaceID {
+                // Assign to a different workspace
+                let wsIndex = targetID - 1
+                if isFloat {
+                    workspaceManager.workspaces[wsIndex].floatingWindowIDs.insert(windowID)
+                    logger.debug("Auto-floated window \(windowID) on workspace \(targetID) (window rule)")
+                } else {
+                    workspaceManager.workspaces[wsIndex].engine.insertWindow(windowID, afterFocused: nil)
+                    workspaceManager.workspaces[wsIndex].windowIDs.insert(windowID)
+                    logger.debug("Assigned window \(windowID) to workspace \(targetID) (window rule)")
+                }
+                // Hide offscreen since it's on an inactive workspace
+                if let info = windowTracker.trackedWindows[windowID] {
+                    info.axElement.setSize(CGSize(width: 1, height: 1))
+                    info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                }
             } else {
-                workspaceManager.activeWorkspace.engine.insertWindow(
-                    windowID, afterFocused: windowTracker.focusedWindowID)
-                workspaceManager.activeWorkspace.windowIDs.insert(windowID)
-                logger.debug("Inserted window \(windowID) into workspace \(self.workspaceManager.activeWorkspaceID)")
+                // Insert into active workspace (existing behavior)
+                if isFloat {
+                    workspaceManager.activeWorkspace.floatingWindowIDs.insert(windowID)
+                    logger.debug("Auto-floated window \(windowID) (window rule)")
+                } else {
+                    workspaceManager.activeWorkspace.engine.insertWindow(
+                        windowID, afterFocused: windowTracker.focusedWindowID)
+                    workspaceManager.activeWorkspace.windowIDs.insert(windowID)
+                    logger.debug("Inserted window \(windowID) into workspace \(self.workspaceManager.activeWorkspaceID)")
+                }
             }
         }
 

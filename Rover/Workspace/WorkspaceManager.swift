@@ -15,7 +15,7 @@ class WorkspaceManager: ObservableObject {
 
     /// Position window's top-left at the screen's bottom-right corner.
     /// Window body extends off-screen below and to the right.
-    private static var offscreenPoint: CGPoint {
+    static var offscreenPoint: CGPoint {
         let screen = NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080)
         return CGPoint(x: screen.maxX - 1, y: screen.maxY - 1)
     }
