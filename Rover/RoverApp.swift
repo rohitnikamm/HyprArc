@@ -1,17 +1,20 @@
-//
-//  RoverApp.swift
-//  Rover
-//
-//  Created by Rohit Nikam on 3/21/26.
-//
-
 import SwiftUI
 
 @main
 struct RoverApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("Rover", systemImage: "square.grid.2x2") {
+            MenuBarView()
+        }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if !AccessibilityHelper.isTrusted() {
+            AccessibilityHelper.requestPermission()
         }
     }
 }
