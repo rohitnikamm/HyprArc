@@ -29,7 +29,8 @@ Bundle ID: `rohit.Rover` | Deployment target: macOS
 - **LSUIElement**: `YES` (menu bar app, no Dock icon)
 - **Hardened Runtime**: `YES` (required for notarization)
 - **File sync groups**: Xcode auto-compiles new files under `Rover/` — no pbxproj edits needed for adding source files
-- **Swift concurrency**: `MainActor` default isolation (Swift 6). Engine types are value types (implicitly `Sendable`). AX/CGEvent callbacks must dispatch to MainActor.
+- **Swift concurrency**: `MainActor` default isolation (Swift 6). Engine types are value types (implicitly `Sendable`). AX/CGEvent callbacks must dispatch to MainActor. Top-level C function pointer callbacks need `nonisolated`. Cross-isolation context objects need `@unchecked Sendable`.
+- **Member import visibility**: `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` is enabled — must explicitly `import Combine` when using `@Published`/`ObservableObject`.
 
 ## Architecture
 
@@ -67,6 +68,11 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Debouncing**: All retile operations use cancel-and-reschedule `DispatchWorkItem` with 50ms delay
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
 
-## Implementation Plan
+## Implementation Progress
 
-Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`. Phases 2 & 3 can be parallel; phases 7 & 8 can be parallel.
+Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
+
+- **Phase 1**: Menu bar app + AX permissions ✅
+- **Phase 2**: Window detection & tracking ✅
+- **Phase 3**: Dwindle layout engine (pure geometry) ← next
+- **Phase 4–10**: Controller, focus nav, operations, master-stack, workspaces, hotkeys, config

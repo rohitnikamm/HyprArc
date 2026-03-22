@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MenuBarView: View {
+    @ObservedObject var windowTracker: WindowTracker
     @State private var accessibilityGranted = AccessibilityHelper.isTrusted()
 
     var body: some View {
@@ -18,6 +19,34 @@ struct MenuBarView: View {
 
             Divider()
 
+            let tileableWindows = windowTracker.trackedWindows.values
+                .filter { $0.isTileable }
+                .sorted { $0.windowID < $1.windowID }
+
+            if tileableWindows.isEmpty {
+                Text("No windows detected")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Windows (\(tileableWindows.count))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(tileableWindows, id: \.windowID) { window in
+                    HStack(spacing: 4) {
+                        if window.windowID == windowTracker.focusedWindowID {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .font(.caption2)
+                        }
+
+                        Text(windowLabel(for: window))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+
+            Divider()
+
             Button("Quit Rover") {
                 NSApplication.shared.terminate(nil)
             }
@@ -25,11 +54,13 @@ struct MenuBarView: View {
         }
         .padding(4)
         .onAppear {
-            refreshAccessibilityStatus()
+            accessibilityGranted = AccessibilityHelper.isTrusted()
         }
     }
 
-    private func refreshAccessibilityStatus() {
-        accessibilityGranted = AccessibilityHelper.isTrusted()
+    private func windowLabel(for window: WindowInfo) -> String {
+        let app = window.bundleID?.split(separator: ".").last.map(String.init) ?? "Unknown"
+        let title = window.title.isEmpty ? "Untitled" : window.title
+        return "\(app): \(title)"
     }
 }
