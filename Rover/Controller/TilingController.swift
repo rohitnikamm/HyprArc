@@ -20,6 +20,7 @@ class TilingController: ObservableObject {
     @Published var activeWorkspaceID: Int = 1
 
     let workspaceManager: WorkspaceManager
+    let configLoader: ConfigLoader
     private let windowTracker: WindowTracker
     private var cancellables: Set<AnyCancellable> = []
     private var retileWorkItem: DispatchWorkItem?
@@ -27,8 +28,14 @@ class TilingController: ObservableObject {
 
     private let logger = Logger(subsystem: "rohit.Rover", category: "TilingController")
 
-    init(windowTracker: WindowTracker) {
+    /// Current gap config from the config file.
+    var currentGaps: GapConfig {
+        configLoader.config.gapConfig
+    }
+
+    init(windowTracker: WindowTracker, configLoader: ConfigLoader) {
         self.windowTracker = windowTracker
+        self.configLoader = configLoader
         self.workspaceManager = WorkspaceManager(windowTracker: windowTracker)
     }
 
@@ -43,6 +50,14 @@ class TilingController: ObservableObject {
             .store(in: &cancellables)
 
         windowTracker.$focusedWindowID
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleSync()
+            }
+            .store(in: &cancellables)
+
+        // Reload on config changes
+        configLoader.$config
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.scheduleSync()
@@ -122,7 +137,7 @@ class TilingController: ObservableObject {
         guard isEnabled, !ws.windowIDs.isEmpty else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
-        let gaps = GapConfig()
+        let gaps = currentGaps
 
         // First pass: calculate frames and check for constraint violations
         var result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
@@ -169,7 +184,7 @@ class TilingController: ObservableObject {
 
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
 
         for (windowID, frame) in result.frames {
             let oldFrame = lastAppliedFrames[windowID]
@@ -208,7 +223,7 @@ class TilingController: ObservableObject {
 
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
 
         guard let neighborID = workspaceManager.activeWorkspace.engine.neighbor(
             of: focused, direction: direction, frames: result) else { return }
@@ -225,7 +240,7 @@ class TilingController: ObservableObject {
 
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
 
         guard let neighborID = workspaceManager.activeWorkspace.engine.neighbor(
             of: focused, direction: direction, frames: result) else { return }
@@ -310,7 +325,7 @@ class TilingController: ObservableObject {
     func windowAt(point: CGPoint) -> WindowID? {
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
         for (windowID, frame) in result.frames {
             if frame.contains(point) {
                 return windowID
@@ -324,7 +339,7 @@ class TilingController: ObservableObject {
     func windowAtTitleBar(point: CGPoint) -> WindowID? {
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
         for (windowID, frame) in result.frames {
             let titleBarRect = CGRect(
                 x: frame.minX, y: frame.minY,
@@ -342,7 +357,7 @@ class TilingController: ObservableObject {
     func splitBoundaryAt(point: CGPoint, tolerance: CGFloat = 10) -> (WindowID, SplitDirection)? {
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: GapConfig())
+            in: screenRect, gaps: currentGaps)
         let frames = result.frames
 
         for (idA, frameA) in frames {
@@ -429,7 +444,7 @@ class TilingController: ObservableObject {
             // Show overlay on the target window
             let screenRect = ScreenHelper.axScreenRect()
             let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-                in: screenRect, gaps: GapConfig())
+                in: screenRect, gaps: currentGaps)
             if let targetFrame = result.frames[targetID] {
                 SwapOverlayWindow.shared.showAt(frame: targetFrame)
             }

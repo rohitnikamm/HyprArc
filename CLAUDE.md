@@ -87,4 +87,4 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 8**: Virtual workspaces (1–9, offscreen hiding) ✅
 - **Phase 9**: Global hotkeys (CGEvent tap, Hyprland bindings) ✅
 - **Phase 9.5**: Mouse-driven resize (drag boundary) & swap (drag title bar, orange overlay) ✅
-- **Phase 10**: Config ← next
+- **Phase 10**: Config system (TOML at `~/.config/rover/config.toml`, hot-reload, 64 total tests) ✅

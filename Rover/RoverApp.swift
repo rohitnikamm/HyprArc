@@ -28,7 +28,9 @@ struct RoverApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     let windowTracker = WindowTracker()
-    lazy var tilingController = TilingController(windowTracker: windowTracker)
+    let configLoader = ConfigLoader()
+    lazy var tilingController = TilingController(
+        windowTracker: windowTracker, configLoader: configLoader)
     lazy var hotkeyManager = HotkeyManager(
         dispatcher: CommandDispatcher(tilingController: tilingController),
         tilingController: tilingController
@@ -38,6 +40,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !AccessibilityHelper.isTrusted() {
             AccessibilityHelper.requestPermission()
         }
+        configLoader.load()
+        configLoader.startWatching()
         windowTracker.start()
         tilingController.start()
         hotkeyManager.start()
@@ -45,6 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyManager.stop()
+        configLoader.stopWatching()
         tilingController.workspaceManager.restoreAllWindows()
         tilingController.stop()
         windowTracker.stop()

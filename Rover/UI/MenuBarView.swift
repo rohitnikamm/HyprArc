@@ -38,6 +38,12 @@ struct MenuBarView: View {
                 )
             }
 
+            Button {
+                tilingController.configLoader.reload()
+            } label: {
+                Label("Reload Config", systemImage: "arrow.clockwise")
+            }
+
             Divider()
 
             let tileableWindows = windowTracker.trackedWindows.values
