@@ -1,15 +1,27 @@
 import SwiftUI
 
+/// Dedicated view for the menu bar label so @ObservedObject
+/// properly subscribes to TilingController changes.
+struct MenuBarLabel: View {
+    @ObservedObject var tilingController: TilingController
+
+    var body: some View {
+        Text("\(tilingController.activeWorkspaceID)")
+    }
+}
+
 @main
 struct RoverApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Rover", systemImage: "square.grid.2x2") {
+        MenuBarExtra {
             MenuBarView(
                 windowTracker: appDelegate.windowTracker,
                 tilingController: appDelegate.tilingController
             )
+        } label: {
+            MenuBarLabel(tilingController: appDelegate.tilingController)
         }
     }
 }
@@ -27,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        tilingController.workspaceManager.restoreAllWindows()
         tilingController.stop()
         windowTracker.stop()
     }

@@ -60,7 +60,7 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 
 ### Technical Decisions
 
-- **Workspace switching** hides windows by moving offscreen to `CGPoint(x: 99999, y: 99999)` (AeroSpace technique) — macOS Spaces has no public API
+- **Workspace switching** hides windows by shrinking to 1x1 then positioning at screen's bottom-right corner (AeroSpace technique) — macOS Spaces has no public API. On quit, all offscreen windows are restored to visible positions.
 - **Dwindle layout** uses a binary tree with auto-split by aspect ratio (width > height → horizontal, else vertical)
 - **Geometric focus navigation** finds neighbors by center-point distance, not tree traversal — works identically across layout algorithms
 - **Coordinate conversion** centralized in `ScreenHelper`: NSScreen (bottom-left origin) → AX (top-left origin): `axY = totalScreenHeight - nsY - height`
@@ -69,6 +69,7 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Constraint-aware tiling**: macOS apps enforce their own minimum sizes (unlike Wayland where compositors have absolute authority). Rover queries `kAXMinimumSizeAttribute` and auto-adjusts split ratios so windows respect their minimums without overlap.
 - **Electron ghost window filtering**: `hasCloseButton` check filters out internal "Browser" helper windows from Electron apps (VSCode, Slack, etc.)
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
+- **MenuBarExtra observation**: `@ObservedObject` doesn't work in `RoverApp` via `appDelegate` chain — use a dedicated `MenuBarLabel` View with its own `@ObservedObject` to observe `TilingController`'s `@Published` properties
 
 ## Implementation Progress
 
@@ -81,5 +82,6 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 5**: Focus navigation (geometric, menu bar buttons) ✅
 - **Phase 6**: Window operations (swap, resize, float) ✅
 - **Phase 7**: Master-stack layout + 21 tests (56 total) ✅
-- **Phase 8**: Virtual workspaces ← next
-- **Phase 9–10**: Hotkeys, config
+- **Phase 8**: Virtual workspaces (1–9, offscreen hiding) ✅
+- **Phase 9**: Global hotkeys ← next
+- **Phase 10**: Config

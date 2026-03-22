@@ -3,10 +3,10 @@ import CoreGraphics
 import os
 
 /// Orchestrates tiling: subscribes to WindowTracker events, feeds the
-/// TilingEngine, and applies calculated frames back via AX.
+/// active workspace's TilingEngine, and applies calculated frames via AX.
 ///
 /// This is the **only** layer that touches both AX (via WindowTracker)
-/// and the pure-geometry engine.
+/// and the pure-geometry engine (via WorkspaceManager).
 @MainActor
 class TilingController: ObservableObject {
     @Published var isEnabled: Bool = true {
@@ -17,11 +17,10 @@ class TilingController: ObservableObject {
         }
     }
     @Published var layoutName: String = "Dwindle"
+    @Published var activeWorkspaceID: Int = 1
 
-    private var engine: any TilingEngine = DwindleLayout()
+    let workspaceManager: WorkspaceManager
     private let windowTracker: WindowTracker
-    private var managedWindowIDs: Set<WindowID> = []
-    private var floatingWindowIDs: Set<WindowID> = []
     private var cancellables: Set<AnyCancellable> = []
     private var retileWorkItem: DispatchWorkItem?
 
@@ -29,6 +28,7 @@ class TilingController: ObservableObject {
 
     init(windowTracker: WindowTracker) {
         self.windowTracker = windowTracker
+        self.workspaceManager = WorkspaceManager(windowTracker: windowTracker)
     }
 
     // MARK: - Lifecycle
@@ -48,6 +48,14 @@ class TilingController: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Forward workspace ID changes to our @Published property for SwiftUI
+        workspaceManager.$activeWorkspaceID
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] id in
+                self?.activeWorkspaceID = id
+            }
+            .store(in: &cancellables)
+
         // Initial sync after a short delay to let the tracker enumerate
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.syncAndRetile()
@@ -61,12 +69,11 @@ class TilingController: ObservableObject {
 
     // MARK: - Sync & Retile
 
-    /// Diff tracked windows against managed windows, insert/remove as needed, then retile.
+    /// Diff tracked windows against active workspace, insert/remove as needed, then retile.
     private func syncAndRetile() {
         guard isEnabled else { return }
 
-        // Refresh window properties before filtering (catches Electron ghost windows
-        // that had zero-sized frames at creation time)
+        // Refresh window properties before filtering
         for windowID in windowTracker.trackedWindows.keys {
             windowTracker.trackedWindows[windowID]?.refresh()
         }
@@ -77,41 +84,44 @@ class TilingController: ObservableObject {
                 .map { $0.windowID }
         )
 
-        // Clean up floating windows that are no longer present
-        floatingWindowIDs = floatingWindowIDs.intersection(currentTileable)
+        let activeWS = workspaceManager.activeWorkspace
 
-        // Insert new windows (skip floating ones)
+        // Clean up floating windows that are no longer present
+        workspaceManager.activeWorkspace.floatingWindowIDs =
+            activeWS.floatingWindowIDs.intersection(currentTileable)
+
+        // Insert new windows into active workspace (skip floating, skip windows owned by other workspaces)
+        let allManaged = workspaceManager.allManagedWindowIDs
         let newWindows = currentTileable
-            .subtracting(managedWindowIDs)
-            .subtracting(floatingWindowIDs)
+            .subtracting(allManaged)
         for windowID in newWindows.sorted() {
-            engine.insertWindow(windowID, afterFocused: windowTracker.focusedWindowID)
-            managedWindowIDs.insert(windowID)
-            logger.debug("Inserted window \(windowID) into engine")
+            workspaceManager.activeWorkspace.engine.insertWindow(
+                windowID, afterFocused: windowTracker.focusedWindowID)
+            workspaceManager.activeWorkspace.windowIDs.insert(windowID)
+            logger.debug("Inserted window \(windowID) into workspace \(self.workspaceManager.activeWorkspaceID)")
         }
 
-        // Remove gone windows
-        let goneWindows = managedWindowIDs.subtracting(currentTileable)
+        // Remove gone windows from whichever workspace owns them
+        let goneWindows = allManaged.subtracting(currentTileable)
         for windowID in goneWindows {
-            engine.removeWindow(windowID)
-            managedWindowIDs.remove(windowID)
-            logger.debug("Removed window \(windowID) from engine")
+            workspaceManager.removeWindowFromAnyWorkspace(windowID)
+            logger.debug("Removed gone window \(windowID)")
         }
 
         retile()
     }
 
-    /// Calculate frames and apply them to windows via AX.
-    /// Constraint-aware: queries each window's minimum size and adjusts
-    /// split ratios so every window gets at least its minimum.
+    /// Calculate frames for the active workspace and apply them via AX.
+    /// Constraint-aware: adjusts split ratios for windows with minimum size constraints.
     private func retile() {
-        guard isEnabled, !managedWindowIDs.isEmpty else { return }
+        let ws = workspaceManager.activeWorkspace
+        guard isEnabled, !ws.windowIDs.isEmpty else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
         let gaps = GapConfig()
 
         // First pass: calculate frames and check for constraint violations
-        var result = engine.calculateFrames(in: screenRect, gaps: gaps)
+        var result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
         var adjusted = false
 
         for (windowID, frame) in result.frames {
@@ -122,30 +132,23 @@ class TilingController: ObservableObject {
             let heightViolation = minSize.height > frame.height + 2
 
             if widthViolation || heightViolation {
-                // Calculate how much more space this window needs as a ratio delta
                 if heightViolation && frame.height > 0 {
-                    let needed = minSize.height - frame.height
-                    let totalHeight = screenRect.height
-                    let delta = needed / totalHeight
-                    engine.resizeSplit(at: windowID, delta: delta)
+                    let delta = (minSize.height - frame.height) / screenRect.height
+                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
                     adjusted = true
                 }
                 if widthViolation && frame.width > 0 {
-                    let needed = minSize.width - frame.width
-                    let totalWidth = screenRect.width
-                    let delta = needed / totalWidth
-                    engine.resizeSplit(at: windowID, delta: delta)
+                    let delta = (minSize.width - frame.width) / screenRect.width
+                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
                     adjusted = true
                 }
             }
         }
 
-        // Second pass: recalculate with adjusted ratios if needed
         if adjusted {
-            result = engine.calculateFrames(in: screenRect, gaps: gaps)
+            result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
         }
 
-        // Apply frames
         for (windowID, frame) in result.frames {
             guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
             windowInfo.axElement.setFrame(frame)
@@ -154,15 +157,16 @@ class TilingController: ObservableObject {
 
     // MARK: - Focus Navigation
 
-    /// Move focus to the nearest window in the given direction.
     func focusDirection(_ direction: Direction) {
         guard let focused = windowTracker.focusedWindowID,
-              managedWindowIDs.contains(focused) else { return }
+              workspaceManager.activeWorkspace.windowIDs.contains(focused) else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
-        let result = engine.calculateFrames(in: screenRect, gaps: GapConfig())
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
 
-        guard let neighborID = engine.neighbor(of: focused, direction: direction, frames: result) else { return }
+        guard let neighborID = workspaceManager.activeWorkspace.engine.neighbor(
+            of: focused, direction: direction, frames: result) else { return }
         guard let windowInfo = windowTracker.trackedWindows[neighborID] else { return }
 
         windowInfo.axElement.focusWindow()
@@ -170,69 +174,79 @@ class TilingController: ObservableObject {
 
     // MARK: - Window Operations
 
-    /// Swap the focused window with its neighbor in the given direction.
     func swapDirection(_ direction: Direction) {
         guard let focused = windowTracker.focusedWindowID,
-              managedWindowIDs.contains(focused) else { return }
+              workspaceManager.activeWorkspace.windowIDs.contains(focused) else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
-        let result = engine.calculateFrames(in: screenRect, gaps: GapConfig())
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
 
-        guard let neighborID = engine.neighbor(of: focused, direction: direction, frames: result) else { return }
+        guard let neighborID = workspaceManager.activeWorkspace.engine.neighbor(
+            of: focused, direction: direction, frames: result) else { return }
 
-        engine.swapWindows(focused, neighborID)
+        workspaceManager.activeWorkspace.engine.swapWindows(focused, neighborID)
         retile()
     }
 
-    /// Resize the split ratio at the focused window's split point.
     func resizeFocusedSplit(delta: CGFloat) {
         guard let focused = windowTracker.focusedWindowID,
-              managedWindowIDs.contains(focused) else { return }
+              workspaceManager.activeWorkspace.windowIDs.contains(focused) else { return }
 
-        engine.resizeSplit(at: focused, delta: delta)
+        workspaceManager.activeWorkspace.engine.resizeSplit(at: focused, delta: delta)
         retile()
     }
 
-    /// Toggle floating for the focused window.
-    /// Float: remove from engine, window stays at its current position.
-    /// Un-float: re-insert into engine at the current focus point.
     func toggleFloat() {
         guard let focused = windowTracker.focusedWindowID else { return }
 
-        if floatingWindowIDs.contains(focused) {
-            // Un-float: re-insert into engine
-            floatingWindowIDs.remove(focused)
-            engine.insertWindow(focused, afterFocused: windowTracker.focusedWindowID)
-            managedWindowIDs.insert(focused)
+        if workspaceManager.activeWorkspace.floatingWindowIDs.contains(focused) {
+            // Un-float
+            workspaceManager.activeWorkspace.floatingWindowIDs.remove(focused)
+            workspaceManager.activeWorkspace.engine.insertWindow(
+                focused, afterFocused: windowTracker.focusedWindowID)
+            workspaceManager.activeWorkspace.windowIDs.insert(focused)
             logger.debug("Un-floated window \(focused)")
             retile()
-        } else if managedWindowIDs.contains(focused) {
-            // Float: remove from engine
-            engine.removeWindow(focused)
-            managedWindowIDs.remove(focused)
-            floatingWindowIDs.insert(focused)
+        } else if workspaceManager.activeWorkspace.windowIDs.contains(focused) {
+            // Float
+            workspaceManager.activeWorkspace.engine.removeWindow(focused)
+            workspaceManager.activeWorkspace.windowIDs.remove(focused)
+            workspaceManager.activeWorkspace.floatingWindowIDs.insert(focused)
             logger.debug("Floated window \(focused)")
             retile()
         }
     }
 
+    // MARK: - Workspace Operations
+
+    func switchToWorkspace(_ id: Int) {
+        workspaceManager.switchToWorkspace(id)
+        activeWorkspaceID = workspaceManager.activeWorkspaceID
+        retile()
+    }
+
+    func moveWindowToWorkspace(_ targetID: Int) {
+        guard let focused = windowTracker.focusedWindowID else { return }
+        workspaceManager.moveWindowToWorkspace(focused, workspace: targetID)
+        retile()
+    }
+
     // MARK: - Layout Switching
 
-    /// Cycle between dwindle and master-stack layouts.
     func cycleLayout() {
-        let currentWindows = engine.windowIDs
+        let currentWindows = workspaceManager.activeWorkspace.engine.windowIDs
 
-        if engine is DwindleLayout {
-            engine = MasterStackLayout()
+        if workspaceManager.activeWorkspace.engine is DwindleLayout {
+            workspaceManager.activeWorkspace.engine = MasterStackLayout()
             layoutName = "Master-Stack"
         } else {
-            engine = DwindleLayout()
+            workspaceManager.activeWorkspace.engine = DwindleLayout()
             layoutName = "Dwindle"
         }
 
-        // Re-insert all windows into the new engine
         for id in currentWindows {
-            engine.insertWindow(id, afterFocused: nil)
+            workspaceManager.activeWorkspace.engine.insertWindow(id, afterFocused: nil)
         }
 
         retile()

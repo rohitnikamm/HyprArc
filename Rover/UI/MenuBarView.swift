@@ -102,6 +102,21 @@ struct MenuBarView: View {
 
             Divider()
 
+            Text("Workspaces")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(1...9, id: \.self) { id in
+                let isActive = id == tilingController.workspaceManager.activeWorkspaceID
+                let hasWindows = !tilingController.workspaceManager.workspaces[id - 1].allWindowIDs.isEmpty
+                let label = isActive ? "[\(id)]" : hasWindows ? " \(id) ⦁" : " \(id)"
+                Button(label) {
+                    tilingController.switchToWorkspace(id)
+                }
+            }
+
+            Divider()
+
             Button("Quit Rover") {
                 NSApplication.shared.terminate(nil)
             }
