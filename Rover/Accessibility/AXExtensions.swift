@@ -46,10 +46,25 @@ extension AXUIElement {
         getAttribute("AXFullScreen") ?? false
     }
 
+    /// True if the window has a close button — real user windows do,
+    /// Electron helper/browser windows don't.
+    var hasCloseButton: Bool {
+        let value: AnyObject? = getAttribute(kAXCloseButtonAttribute)
+        return value != nil
+    }
+
     var pid: pid_t? {
         var pid: pid_t = 0
         let result = AXUIElementGetPid(self, &pid)
         return result == .success ? pid : nil
+    }
+
+    /// The minimum size the app allows for this window, if declared.
+    var minimumSize: CGSize? {
+        guard let value: AnyObject = getAttribute("AXMinimumSize") else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+        return size
     }
 
     // MARK: - Frame (Position + Size)

@@ -14,11 +14,15 @@ struct WindowInfo {
     var isFullscreen: Bool
     var role: String?
     var subrole: String?
+    var hasCloseButton: Bool
 
     /// Whether this window should be tiled (standard window, not a dialog/sheet/panel).
+    /// Filters out ghost/helper windows from Electron apps (VSCode, Slack, etc.)
+    /// by requiring a close button — real windows have one, Electron helpers don't.
     var isTileable: Bool {
         role == kAXWindowRole as String
             && subrole == kAXStandardWindowSubrole as String
+            && hasCloseButton
             && !isMinimized
             && !isFullscreen
     }
@@ -49,7 +53,8 @@ struct WindowInfo {
             isMinimized: element.isMinimized,
             isFullscreen: element.isFullscreen,
             role: element.role,
-            subrole: element.subrole
+            subrole: element.subrole,
+            hasCloseButton: element.hasCloseButton
         )
     }
 

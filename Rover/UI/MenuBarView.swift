@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var windowTracker: WindowTracker
+    @ObservedObject var tilingController: TilingController
     @State private var accessibilityGranted = AccessibilityHelper.isTrusted()
 
     var body: some View {
@@ -15,6 +16,17 @@ struct MenuBarView: View {
                 Button("Grant Permission…") {
                     AccessibilityHelper.requestPermission()
                 }
+            }
+
+            Divider()
+
+            Button {
+                tilingController.isEnabled.toggle()
+            } label: {
+                Label(
+                    tilingController.isEnabled ? "Tiling: On" : "Tiling: Off",
+                    systemImage: tilingController.isEnabled ? "square.grid.2x2.fill" : "square.grid.2x2"
+                )
             }
 
             Divider()

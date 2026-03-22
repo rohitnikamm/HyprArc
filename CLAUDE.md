@@ -66,6 +66,8 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Coordinate conversion** centralized in `ScreenHelper`: NSScreen (bottom-left origin) → AX (top-left origin): `axY = totalScreenHeight - nsY - height`
 - **`_AXUIElementGetWindow`** private API isolated in `AXPrivateAPIs.swift` — single swap point if Apple ever removes it
 - **Debouncing**: All retile operations use cancel-and-reschedule `DispatchWorkItem` with 50ms delay
+- **Constraint-aware tiling**: macOS apps enforce their own minimum sizes (unlike Wayland where compositors have absolute authority). Rover queries `kAXMinimumSizeAttribute` and auto-adjusts split ratios so windows respect their minimums without overlap.
+- **Electron ghost window filtering**: `hasCloseButton` check filters out internal "Browser" helper windows from Electron apps (VSCode, Slack, etc.)
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
 
 ## Implementation Progress
@@ -75,5 +77,6 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 1**: Menu bar app + AX permissions ✅
 - **Phase 2**: Window detection & tracking ✅
 - **Phase 3**: Dwindle layout engine + 35 unit tests ✅
-- **Phase 4**: Tiling controller (AX → engine) ← next
-- **Phase 5–10**: Focus nav, operations, master-stack, workspaces, hotkeys, config
+- **Phase 4**: Tiling controller (AX → engine) ✅
+- **Phase 5**: Focus navigation ← next
+- **Phase 6–10**: Operations, master-stack, workspaces, hotkeys, config
