@@ -145,6 +145,22 @@ class TilingController: ObservableObject {
         }
     }
 
+    // MARK: - Focus Navigation
+
+    /// Move focus to the nearest window in the given direction.
+    func focusDirection(_ direction: Direction) {
+        guard let focused = windowTracker.focusedWindowID,
+              managedWindowIDs.contains(focused) else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = engine.calculateFrames(in: screenRect, gaps: GapConfig())
+
+        guard let neighborID = engine.neighbor(of: focused, direction: direction, frames: result) else { return }
+        guard let windowInfo = windowTracker.trackedWindows[neighborID] else { return }
+
+        windowInfo.axElement.focusWindow()
+    }
+
     // MARK: - Debounce
 
     private func scheduleSync() {

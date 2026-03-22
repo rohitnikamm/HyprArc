@@ -44,17 +44,25 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
 
                 ForEach(tileableWindows, id: \.windowID) { window in
-                    HStack(spacing: 4) {
-                        if window.windowID == windowTracker.focusedWindowID {
-                            Image(systemName: "arrow.right.circle.fill")
-                                .font(.caption2)
-                        }
-
-                        Text(windowLabel(for: window))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
+                    let isFocused = window.windowID == windowTracker.focusedWindowID
+                    let prefix = isFocused ? "⦁ " : "  "
+                    Text(prefix + windowLabel(for: window))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+            }
+
+            Divider()
+
+            Text("Focus")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Button("Left") { tilingController.focusDirection(.left) }
+                Button("Down") { tilingController.focusDirection(.down) }
+                Button("Up") { tilingController.focusDirection(.up) }
+                Button("Right") { tilingController.focusDirection(.right) }
             }
 
             Divider()
