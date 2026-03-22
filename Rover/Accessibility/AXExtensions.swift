@@ -117,11 +117,14 @@ extension AXUIElement {
     // MARK: - Focus
 
     func focusWindow() {
-        _ = setAttribute(kAXMainAttribute, value: kCFBooleanTrue)
-        _ = setAttribute(kAXFocusedAttribute, value: kCFBooleanTrue)
-
+        // Activate the owning app FIRST so it comes to front,
+        // then raise the window and set AX focus attributes.
         if let pid {
             NSRunningApplication(processIdentifier: pid)?.activate()
         }
+
+        _ = AXUIElementPerformAction(self, kAXRaiseAction as CFString)
+        _ = setAttribute(kAXMainAttribute, value: kCFBooleanTrue)
+        _ = setAttribute(kAXFocusedAttribute, value: kCFBooleanTrue)
     }
 }

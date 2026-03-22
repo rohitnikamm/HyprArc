@@ -23,6 +23,7 @@ class TilingController: ObservableObject {
     private let windowTracker: WindowTracker
     private var cancellables: Set<AnyCancellable> = []
     private var retileWorkItem: DispatchWorkItem?
+    private var lastAppliedFrames: [WindowID: CGRect] = [:]
 
     private let logger = Logger(subsystem: "rohit.Rover", category: "TilingController")
 
@@ -71,6 +72,9 @@ class TilingController: ObservableObject {
 
     /// Diff tracked windows against active workspace, insert/remove as needed, then retile.
     private func syncAndRetile() {
+        // Suppress sync during active mouse resize/swap to prevent feedback loops
+        // (setting frames triggers AXObserver which triggers syncAndRetile)
+        guard !isResizing && !isSwapping else { return }
         guard isEnabled else { return }
 
         // Refresh window properties before filtering
@@ -149,9 +153,50 @@ class TilingController: ObservableObject {
             result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
         }
 
+        lastAppliedFrames.removeAll()
         for (windowID, frame) in result.frames {
             guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
             windowInfo.axElement.setFrame(frame)
+            lastAppliedFrames[windowID] = frame
+        }
+    }
+
+    /// Lightweight retile for interactive drag operations — skips constraint checks
+    /// and only applies AX calls for frames that actually changed.
+    private func retileFast() {
+        let ws = workspaceManager.activeWorkspace
+        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
+
+        for (windowID, frame) in result.frames {
+            let oldFrame = lastAppliedFrames[windowID]
+
+            // Skip entirely if frame hasn't changed
+            if let old = oldFrame, abs(old.origin.x - frame.origin.x) < 1
+                && abs(old.origin.y - frame.origin.y) < 1
+                && abs(old.width - frame.width) < 1
+                && abs(old.height - frame.height) < 1 {
+                continue
+            }
+
+            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
+
+            // Only set position if it changed
+            if oldFrame == nil || abs(oldFrame!.origin.x - frame.origin.x) >= 1
+                || abs(oldFrame!.origin.y - frame.origin.y) >= 1 {
+                windowInfo.axElement.setPosition(frame.origin)
+            }
+
+            // Only set size if it changed
+            if oldFrame == nil || abs(oldFrame!.width - frame.width) >= 1
+                || abs(oldFrame!.height - frame.height) >= 1 {
+                windowInfo.axElement.setSize(frame.size)
+            }
+
+            lastAppliedFrames[windowID] = frame
         }
     }
 
@@ -252,6 +297,167 @@ class TilingController: ObservableObject {
         retile()
         logger.debug("Switched layout to \(self.layoutName)")
     }
+
+    // MARK: - Mouse Resize & Swap
+
+    private var resizingWindowID: WindowID?
+    private var resizeAxis: SplitDirection?
+    private var resizeDragOrigin: CGPoint?
+
+    private var swapSourceWindowID: WindowID?
+
+    /// Find which tiled window contains the given screen point.
+    func windowAt(point: CGPoint) -> WindowID? {
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
+        for (windowID, frame) in result.frames {
+            if frame.contains(point) {
+                return windowID
+            }
+        }
+        return nil
+    }
+
+    /// Find which tiled window's title bar contains the given point.
+    /// Title bar is the top ~30px of the window frame.
+    func windowAtTitleBar(point: CGPoint) -> WindowID? {
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
+        for (windowID, frame) in result.frames {
+            let titleBarRect = CGRect(
+                x: frame.minX, y: frame.minY,
+                width: frame.width, height: 30
+            )
+            if titleBarRect.contains(point) {
+                return windowID
+            }
+        }
+        return nil
+    }
+
+    /// Find if the point is near a split boundary. Returns the window ID whose
+    /// split should be resized, and the axis of the boundary.
+    func splitBoundaryAt(point: CGPoint, tolerance: CGFloat = 10) -> (WindowID, SplitDirection)? {
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: GapConfig())
+        let frames = result.frames
+
+        for (idA, frameA) in frames {
+            for (idB, frameB) in frames where idA != idB {
+                // Check vertical boundary (frames side by side)
+                if abs(frameA.maxX - frameB.minX) < tolerance * 2 {
+                    let boundaryX = (frameA.maxX + frameB.minX) / 2
+                    let minY = max(frameA.minY, frameB.minY)
+                    let maxY = min(frameA.maxY, frameB.maxY)
+                    if abs(point.x - boundaryX) < tolerance && point.y >= minY && point.y <= maxY {
+                        return (idA, .horizontal)
+                    }
+                }
+                // Check horizontal boundary (frames stacked)
+                if abs(frameA.maxY - frameB.minY) < tolerance * 2 {
+                    let boundaryY = (frameA.maxY + frameB.minY) / 2
+                    let minX = max(frameA.minX, frameB.minX)
+                    let maxX = min(frameA.maxX, frameB.maxX)
+                    if abs(point.y - boundaryY) < tolerance && point.x >= minX && point.x <= maxX {
+                        return (idA, .vertical)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Begin a mouse resize operation.
+    func beginResize(at point: CGPoint) {
+        guard let (windowID, axis) = splitBoundaryAt(point: point) else { return }
+        resizingWindowID = windowID
+        resizeAxis = axis
+        resizeDragOrigin = point
+        logger.debug("Begin resize at boundary near window \(windowID)")
+    }
+
+    /// Update resize during drag.
+    func updateResize(to point: CGPoint) {
+        guard let windowID = resizingWindowID,
+              let axis = resizeAxis,
+              let origin = resizeDragOrigin else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let delta: CGFloat
+        switch axis {
+        case .horizontal:
+            delta = (point.x - origin.x) / screenRect.width
+        case .vertical:
+            delta = (point.y - origin.y) / screenRect.height
+        }
+
+        // Only apply if delta is significant
+        guard abs(delta) > 0.005 else { return }
+
+        workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
+        resizeDragOrigin = point
+        retileFast()  // Skip constraint checks during drag for smooth performance
+    }
+
+    /// End resize operation. Runs full retile with constraint checks.
+    func endResize() {
+        let wasResizing = resizingWindowID != nil
+        resizingWindowID = nil
+        resizeAxis = nil
+        resizeDragOrigin = nil
+        if wasResizing {
+            retile()  // Full retile with constraint checks on release
+            logger.debug("End resize")
+        }
+    }
+
+    /// Begin a mouse swap operation (triggered by clicking on a window's title bar).
+    func beginSwap(at point: CGPoint) {
+        guard let windowID = windowAtTitleBar(point: point) else { return }
+        swapSourceWindowID = windowID
+        logger.debug("Begin swap from window \(windowID)")
+    }
+
+    /// Update swap overlay during drag — highlight the window under the mouse.
+    func updateSwapOverlay(at point: CGPoint) {
+        guard swapSourceWindowID != nil else { return }
+
+        if let targetID = windowAt(point: point), targetID != swapSourceWindowID {
+            // Show overlay on the target window
+            let screenRect = ScreenHelper.axScreenRect()
+            let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+                in: screenRect, gaps: GapConfig())
+            if let targetFrame = result.frames[targetID] {
+                SwapOverlayWindow.shared.showAt(frame: targetFrame)
+            }
+        } else {
+            SwapOverlayWindow.shared.hide()
+        }
+    }
+
+    /// End swap — swap source with whatever window is under the mouse.
+    func endSwap(at point: CGPoint) {
+        SwapOverlayWindow.shared.hide()
+
+        guard let sourceID = swapSourceWindowID else { return }
+        swapSourceWindowID = nil
+
+        guard let targetID = windowAt(point: point),
+              targetID != sourceID else {
+            logger.debug("Swap cancelled — same or no target window")
+            return
+        }
+
+        workspaceManager.activeWorkspace.engine.swapWindows(sourceID, targetID)
+        retile()
+        logger.debug("Swapped window \(sourceID) with \(targetID)")
+    }
+
+    var isResizing: Bool { resizingWindowID != nil }
+    var isSwapping: Bool { swapSourceWindowID != nil }
 
     // MARK: - Debounce
 

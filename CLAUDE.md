@@ -70,6 +70,8 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Electron ghost window filtering**: `hasCloseButton` check filters out internal "Browser" helper windows from Electron apps (VSCode, Slack, etc.)
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
 - **MenuBarExtra observation**: `@ObservedObject` doesn't work in `RoverApp` via `appDelegate` chain — use a dedicated `MenuBarLabel` View with its own `@ObservedObject` to observe `TilingController`'s `@Published` properties
+- **Mouse resize**: No modifier needed — drag directly on split boundary gap. Uses `retileFast()` (skips constraint checks) + frame-diff tracking (only AX calls for changed windows) for smooth performance
+- **Mouse swap**: No modifier needed — drag from window title bar (top 30px) to another window. Orange translucent overlay (`SwapOverlayWindow`) highlights the target during drag. Uses `DispatchQueue.main.async` (not Task) for low-latency mouse event handling
 
 ## Implementation Progress
 
@@ -83,5 +85,6 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 6**: Window operations (swap, resize, float) ✅
 - **Phase 7**: Master-stack layout + 21 tests (56 total) ✅
 - **Phase 8**: Virtual workspaces (1–9, offscreen hiding) ✅
-- **Phase 9**: Global hotkeys ← next
-- **Phase 10**: Config
+- **Phase 9**: Global hotkeys (CGEvent tap, Hyprland bindings) ✅
+- **Phase 9.5**: Mouse-driven resize (drag boundary) & swap (drag title bar, orange overlay) ✅
+- **Phase 10**: Config ← next

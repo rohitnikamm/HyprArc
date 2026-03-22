@@ -63,45 +63,6 @@ struct MenuBarView: View {
 
             Divider()
 
-            Text("Focus")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                Button("Left") { tilingController.focusDirection(.left) }
-                Button("Down") { tilingController.focusDirection(.down) }
-                Button("Up") { tilingController.focusDirection(.up) }
-                Button("Right") { tilingController.focusDirection(.right) }
-            }
-
-            Divider()
-
-            Text("Swap")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                Button("Left") { tilingController.swapDirection(.left) }
-                Button("Down") { tilingController.swapDirection(.down) }
-                Button("Up") { tilingController.swapDirection(.up) }
-                Button("Right") { tilingController.swapDirection(.right) }
-            }
-
-            Divider()
-
-            Text("Resize")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                Button("Shrink") { tilingController.resizeFocusedSplit(delta: -0.05) }
-                Button("Grow") { tilingController.resizeFocusedSplit(delta: 0.05) }
-            }
-
-            Button("Toggle Float") { tilingController.toggleFloat() }
-
-            Divider()
-
             Text("Workspaces")
                 .font(.caption)
                 .foregroundStyle(.secondary)
