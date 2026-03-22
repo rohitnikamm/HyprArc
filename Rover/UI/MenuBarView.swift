@@ -108,10 +108,37 @@ struct MenuBarView: View {
         result = result + Text(Image(nsImage: spacer))
 
         for app in apps {
-            app.icon.size = NSSize(width: 14, height: 14)
-            result = result + Text(" ") + Text(Image(nsImage: app.icon)).baselineOffset(-3)
+            let icon = retinaIcon(app.icon, size: 14)
+            result = result + Text(" ") + Text(Image(nsImage: icon)).baselineOffset(-3)
         }
 
+        return result
+    }
+
+    /// Render an icon at 2x pixel density for Retina-sharp display at the given point size.
+    private func retinaIcon(_ icon: NSImage, size: CGFloat) -> NSImage {
+        let pointSize = NSSize(width: size, height: size)
+        let pixelSize = Int(size * 4)
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelSize, pixelsHigh: pixelSize,
+            bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { icon.size = pointSize; return icon }
+
+        rep.size = pointSize
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        icon.draw(in: NSRect(origin: .zero, size: pointSize))
+        NSGraphicsContext.restoreGraphicsState()
+
+        let result = NSImage(size: pointSize)
+        result.addRepresentation(rep)
         return result
     }
 
