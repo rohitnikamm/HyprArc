@@ -412,6 +412,7 @@ private struct LayoutsTab: View {
 
 private struct WindowRulesTab: View {
     @ObservedObject var configLoader: ConfigLoader
+    @State private var appListRefresh = false
 
     var body: some View {
         Group {
@@ -472,6 +473,7 @@ private struct WindowRulesTab: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    let _ = appListRefresh  // Force re-evaluation when apps change
                     let apps = NSWorkspace.shared.runningApplications
                         .filter { $0.activationPolicy == .regular
                             && $0.bundleIdentifier != nil
@@ -488,7 +490,17 @@ private struct WindowRulesTab: View {
                             }
                             configLoader.save()
                         } label: {
-                            Text("\(app.localizedName ?? "Unknown") — \(app.bundleIdentifier ?? "")")
+                            let icon: NSImage = {
+                                guard let bundleID = app.bundleIdentifier,
+                                      let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+                                else { return NSImage() }
+                                return retinaIcon(NSWorkspace.shared.icon(forFile: url.path), size: 16)
+                            }()
+                            Label {
+                                Text("\(app.localizedName ?? "Unknown") — \(app.bundleIdentifier ?? "")")
+                            } icon: {
+                                Image(nsImage: icon)
+                            }
                         }
                     }
 
@@ -506,6 +518,12 @@ private struct WindowRulesTab: View {
                     Image(systemName: "plus")
                 }
             }
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            appListRefresh.toggle()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            appListRefresh.toggle()
         }
     }
 
@@ -555,6 +573,32 @@ private struct WindowRulesTab: View {
                 }
             }
         )
+    }
+
+    private func retinaIcon(_ icon: NSImage, size: CGFloat) -> NSImage {
+        let pointSize = NSSize(width: size, height: size)
+        let pixelSize = Int(size * 4)
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelSize, pixelsHigh: pixelSize,
+            bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { icon.size = pointSize; return icon }
+
+        rep.size = pointSize
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        icon.draw(in: NSRect(origin: .zero, size: pointSize))
+        NSGraphicsContext.restoreGraphicsState()
+
+        let result = NSImage(size: pointSize)
+        result.addRepresentation(rep)
+        return result
     }
 }
 
