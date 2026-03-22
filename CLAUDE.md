@@ -56,7 +56,7 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 | `Workspace/` | Virtual workspace management (9 workspaces, hide via offscreen move) |
 | `Hotkeys/` | Global hotkey registration via `CGEvent.tapCreate`, `KeyBinding` model (with `parse()`/`toString()` for config strings), `CommandDispatcher` (loads bindings from config) |
 | `Config/` | TOML config at `~/.config/rover/config.toml` with hot-reload via `DispatchSource`, `TOMLSerializer` for saving, `ConfigLoader` with debounced `save()` |
-| `UI/` | `MenuBarView` dropdown, `SettingsView` (NavigationSplitView sidebar: General, Gaps, Layouts, Keybindings, Window Rules), `SwapOverlayWindow` |
+| `UI/` | `MenuBarView` dropdown (workspace rows with inline app icons via `Text(Image(nsImage:))`), `SettingsView` (NavigationSplitView sidebar: General, Gaps, Layouts, Keybindings, Window Rules), `SwapOverlayWindow` |
 
 ### Technical Decisions
 
@@ -97,3 +97,4 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 10**: Config system (TOML at `~/.config/rover/config.toml`, hot-reload, 64 total tests) ✅
 - **Phase 10.5**: Settings UI + configurable hotkeys + all config settings wired up (layout switching, split/master ratios, orientation, window rules auto-float) + reset to defaults ✅
 - **Phase 11**: Settings UI redesign — NavigationSplitView sidebar, Apple HIG, Liquid Glass, mouse-through fix, microinteractions (inline reset morph, animated window rules rows, slider highlight, sliding pill picker, sidebar hover highlight), selective haptics (NSHapticFeedbackManager) ✅
+- **Phase 12**: Menu bar workspace app icons — replaced verbose Windows list + bullet indicators with inline app icons per workspace. Icons resolved from `bundleID` via `NSWorkspace.shared.urlForApplication`. Uses `Text(Image(nsImage:))` for inline rendering (macOS NSMenu reorders standalone `Image` views). 14x14 icons with `.baselineOffset(-3)`. Invisible 1x14 spacer image in ALL rows normalizes NSMenu tracking rects (fixes off-by-one hover misalignment). `objectWillChange.send()` in `syncAndRetile()` for live updates. `spacedLabel()` helper applies the same spacer to non-workspace rows (Settings, Quit, Tiling, Layout, Reload) so ALL menu items have uniform tracking rects. ✅

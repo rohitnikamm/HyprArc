@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MenuBarView: View {
@@ -9,7 +10,7 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label(
+            spacedLabel(
                 accessibilityGranted ? "Accessibility: Granted" : "Accessibility: Not Granted",
                 systemImage: accessibilityGranted ? "checkmark.shield.fill" : "xmark.shield.fill"
             )
@@ -25,7 +26,7 @@ struct MenuBarView: View {
             Button {
                 tilingController.isEnabled.toggle()
             } label: {
-                Label(
+                spacedLabel(
                     tilingController.isEnabled ? "Tiling: On" : "Tiling: Off",
                     systemImage: tilingController.isEnabled ? "square.grid.2x2.fill" : "square.grid.2x2"
                 )
@@ -34,7 +35,7 @@ struct MenuBarView: View {
             Button {
                 tilingController.cycleLayout()
             } label: {
-                Label(
+                spacedLabel(
                     "Layout: \(tilingController.layoutName)",
                     systemImage: tilingController.layoutName == "Dwindle" ? "arrow.trianglehead.branch" : "sidebar.left"
                 )
@@ -43,30 +44,7 @@ struct MenuBarView: View {
             Button {
                 tilingController.configLoader.reload()
             } label: {
-                Label("Reload Config", systemImage: "arrow.clockwise")
-            }
-
-            Divider()
-
-            let tileableWindows = windowTracker.trackedWindows.values
-                .filter { $0.isTileable }
-                .sorted { $0.windowID < $1.windowID }
-
-            if tileableWindows.isEmpty {
-                Text("No windows detected")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Windows (\(tileableWindows.count))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                ForEach(tileableWindows, id: \.windowID) { window in
-                    let isFocused = window.windowID == windowTracker.focusedWindowID
-                    let prefix = isFocused ? "⦁ " : "  "
-                    Text(prefix + windowLabel(for: window))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                spacedLabel("Reload Config", systemImage: "arrow.clockwise")
             }
 
             Divider()
@@ -77,10 +55,13 @@ struct MenuBarView: View {
 
             ForEach(1...9, id: \.self) { id in
                 let isActive = id == tilingController.workspaceManager.activeWorkspaceID
-                let hasWindows = !tilingController.workspaceManager.workspaces[id - 1].allWindowIDs.isEmpty
-                let label = isActive ? "[\(id)]" : hasWindows ? " \(id) ⦁" : " \(id)"
-                Button(label) {
+                let workspace = tilingController.workspaceManager.workspaces[id - 1]
+                let apps = uniqueApps(for: workspace)
+
+                Button {
                     tilingController.switchToWorkspace(id)
+                } label: {
+                    workspaceLabel(id: id, isActive: isActive, apps: apps)
                 }
             }
 
@@ -90,11 +71,13 @@ struct MenuBarView: View {
                 openWindow(id: "settings")
                 NSApplication.shared.activate(ignoringOtherApps: true)
             } label: {
-                Label("Settings…", systemImage: "gearshape")
+                spacedLabel("Settings…", systemImage: "gearshape")
             }
 
-            Button("Quit Rover") {
+            Button {
                 NSApplication.shared.terminate(nil)
+            } label: {
+                spacedLabel("Quit Rover", systemImage: "power")
             }
             .keyboardShortcut("q")
         }
@@ -104,9 +87,48 @@ struct MenuBarView: View {
         }
     }
 
-    private func windowLabel(for window: WindowInfo) -> String {
-        let app = window.bundleID?.split(separator: ".").last.map(String.init) ?? "Unknown"
-        let title = window.title.isEmpty ? "Untitled" : window.title
-        return "\(app): \(title)"
+    /// Build a label with an invisible spacer to match workspace row height.
+    private func spacedLabel(_ title: String, systemImage: String) -> some View {
+        Label {
+            let spacer = NSImage(size: NSSize(width: 1, height: 14))
+            Text(title) + Text(Image(nsImage: spacer))
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+
+    /// Build a workspace label with number followed by inline app icons.
+    private func workspaceLabel(id: Int, isActive: Bool, apps: [(id: String, icon: NSImage)]) -> Text {
+        var result = Text(isActive ? "[\(id)]" : " \(id) ")
+            .fontWeight(isActive ? .bold : .regular)
+
+        // Invisible spacer image to normalize row height across all workspaces
+        // (prevents NSMenu tracking rect misalignment when some rows have icons and others don't)
+        let spacer = NSImage(size: NSSize(width: 1, height: 14))
+        result = result + Text(Image(nsImage: spacer))
+
+        for app in apps {
+            app.icon.size = NSSize(width: 14, height: 14)
+            result = result + Text(" ") + Text(Image(nsImage: app.icon)).baselineOffset(-3)
+        }
+
+        return result
+    }
+
+    /// Get deduplicated (bundleID, icon) pairs for all windows in a workspace.
+    private func uniqueApps(for workspace: Workspace) -> [(id: String, icon: NSImage)] {
+        var seenBundleIDs = Set<String>()
+        var apps: [(id: String, icon: NSImage)] = []
+
+        for windowID in workspace.allWindowIDs.sorted() {
+            guard let bundleID = windowTracker.trackedWindows[windowID]?.bundleID,
+                  !seenBundleIDs.contains(bundleID) else { continue }
+            seenBundleIDs.insert(bundleID)
+
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                apps.append((id: bundleID, icon: NSWorkspace.shared.icon(forFile: url.path)))
+            }
+        }
+        return apps
     }
 }

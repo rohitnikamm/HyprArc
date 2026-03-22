@@ -195,6 +195,9 @@ class TilingController: ObservableObject {
         }
 
         retile()
+
+        // Notify observers (MenuBarView) that workspace content changed
+        objectWillChange.send()
     }
 
     /// Calculate frames for the active workspace and apply them via AX.
