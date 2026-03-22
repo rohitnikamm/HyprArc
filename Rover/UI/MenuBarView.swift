@@ -29,6 +29,15 @@ struct MenuBarView: View {
                 )
             }
 
+            Button {
+                tilingController.cycleLayout()
+            } label: {
+                Label(
+                    "Layout: \(tilingController.layoutName)",
+                    systemImage: tilingController.layoutName == "Dwindle" ? "arrow.trianglehead.branch" : "sidebar.left"
+                )
+            }
+
             Divider()
 
             let tileableWindows = windowTracker.trackedWindows.values

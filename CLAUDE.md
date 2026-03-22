@@ -80,5 +80,6 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 4**: Tiling controller (AX → engine) ✅
 - **Phase 5**: Focus navigation (geometric, menu bar buttons) ✅
 - **Phase 6**: Window operations (swap, resize, float) ✅
-- **Phase 7**: Master-stack layout ← next
-- **Phase 8–10**: Workspaces, hotkeys, config
+- **Phase 7**: Master-stack layout + 21 tests (56 total) ✅
+- **Phase 8**: Virtual workspaces ← next
+- **Phase 9–10**: Hotkeys, config

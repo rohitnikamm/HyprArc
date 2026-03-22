@@ -16,8 +16,9 @@ class TilingController: ObservableObject {
             }
         }
     }
+    @Published var layoutName: String = "Dwindle"
 
-    private var engine = DwindleLayout()
+    private var engine: any TilingEngine = DwindleLayout()
     private let windowTracker: WindowTracker
     private var managedWindowIDs: Set<WindowID> = []
     private var floatingWindowIDs: Set<WindowID> = []
@@ -213,6 +214,29 @@ class TilingController: ObservableObject {
             logger.debug("Floated window \(focused)")
             retile()
         }
+    }
+
+    // MARK: - Layout Switching
+
+    /// Cycle between dwindle and master-stack layouts.
+    func cycleLayout() {
+        let currentWindows = engine.windowIDs
+
+        if engine is DwindleLayout {
+            engine = MasterStackLayout()
+            layoutName = "Master-Stack"
+        } else {
+            engine = DwindleLayout()
+            layoutName = "Dwindle"
+        }
+
+        // Re-insert all windows into the new engine
+        for id in currentWindows {
+            engine.insertWindow(id, afterFocused: nil)
+        }
+
+        retile()
+        logger.debug("Switched layout to \(self.layoutName)")
     }
 
     // MARK: - Debounce
