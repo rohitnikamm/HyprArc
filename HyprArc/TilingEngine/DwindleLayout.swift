@@ -21,6 +21,7 @@ struct SplitNode: Sendable {
 /// Split direction is determined by the container's aspect ratio:
 /// width > height → horizontal (side by side), otherwise vertical (stacked).
 struct DwindleLayout: TilingEngine {
+    nonisolated init() {}
     private(set) var root: DwindleNode?
     /// Default ratio for new split nodes (0.1–0.9). Configurable via config.
     var defaultSplitRatio: CGFloat = 0.5

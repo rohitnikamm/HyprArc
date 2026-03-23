@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import os
 
@@ -11,6 +12,9 @@ nonisolated(unsafe) var isRecordingKeybinding = false
 class HotkeyManager {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var tapThread: Thread?
+    private nonisolated(unsafe) var tapRunLoop: CFRunLoop?
+    private var watchdogTimer: DispatchSourceTimer?
     private let dispatcher: CommandDispatcher
     let tilingController: TilingController
     private var hotkeyContext: HotkeyContext?
@@ -56,20 +60,92 @@ class HotkeyManager {
         }
 
         eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        context.eventTapPort = tap
+        let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        runLoopSource = source
 
+        // Run the tap on a dedicated background thread with its own run loop.
+        // This prevents system-wide input freeze if main thread blocks on a
+        // hanging AX call (e.g. when permission is revoked mid-session).
+        var capturedRunLoop: CFRunLoop?
+        let semaphore = DispatchSemaphore(value: 0)
+
+        let thread = Thread {
+            capturedRunLoop = CFRunLoopGetCurrent()
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            semaphore.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "HyprArc.EventTap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+
+        _ = semaphore.wait(timeout: .now() + 2)
+        tapRunLoop = capturedRunLoop
+        tapThread = thread
+
+        startWatchdog()
         logger.debug("Global hotkeys + mouse events registered")
     }
 
-    func stop() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            if let source = runLoopSource {
-                CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+    /// Background watchdog: detects AX permission revocation.
+    /// Uses dummy CGEvent.tapCreate() probe — the most reliable detection method:
+    /// - `AXIsProcessTrusted()` returns stale `true` due to per-process TCC caching
+    /// - `AXUIElementCopyAttributeValue` can hang indefinitely when permission is revoked
+    /// - `CGEvent.tapCreate()` returns nil immediately when permission is revoked, never hangs
+    /// On detection: disables tap + exit(0) immediately (Deskflow pattern).
+    private func startWatchdog() {
+        guard let tap = eventTap else { return }
+        let tapRL = tapRunLoop
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
+        timer.setEventHandler { [weak self] in
+            if !Self.isEventTapPermitted() {
+                // Permission revoked — disable tap immediately to stop event swallowing
+                CGEvent.tapEnable(tap: tap, enable: false)
+                CFMachPortInvalidate(tap)
+                if let tapRL { CFRunLoopStop(tapRL) }
+                self?.watchdogTimer?.cancel()
+                // exit(0) is safest: any AX call on main may hang,
+                // graceful degradation risks blocking. Fresh launch gets clean TCC state.
+                exit(0)
             }
         }
+        timer.resume()
+        watchdogTimer = timer
+    }
+
+    /// Reliable permission check: tries to create a dummy event tap.
+    /// Returns false when permission is revoked. Fast, never hangs,
+    /// not affected by TCC per-process caching.
+    nonisolated static func isEventTapPermitted() -> Bool {
+        let dummyTap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+            callback: { _, _, event, _ in Unmanaged.passRetained(event) },
+            userInfo: nil
+        )
+        guard let tap = dummyTap else { return false }
+        CFMachPortInvalidate(tap)
+        return true
+    }
+
+    func stop() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let rl = tapRunLoop {
+            CFRunLoopStop(rl)
+        }
+        tapThread?.cancel()
+        tapThread = nil
+        tapRunLoop = nil
         eventTap = nil
         runLoopSource = nil
     }
@@ -81,7 +157,8 @@ class HotkeyManager {
 private final class HotkeyContext: @unchecked Sendable {
     let dispatcher: CommandDispatcher
     let tilingController: TilingController
-    var lastDragTime: CFAbsoluteTime = 0
+    nonisolated(unsafe) var lastDragTime: CFAbsoluteTime = 0
+    nonisolated(unsafe) var eventTapPort: CFMachPort?
 
     /// Dynamic list of registered keybindings, updated when config changes.
     /// Array (not Set) to avoid Hashable conformance in nonisolated context.
@@ -102,6 +179,25 @@ nonisolated private func hotkeyCallback(
 ) -> Unmanaged<CGEvent>? {
     // Handle tap disabled by system
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        // Use dummy tapCreate probe — reliable, never hangs, bypasses TCC cache
+        if !HotkeyManager.isEventTapPermitted() {
+            // Permission revoked — disable tap, watchdog will exit(0)
+            if let userInfo {
+                let context = Unmanaged<HotkeyContext>.fromOpaque(userInfo).takeUnretainedValue()
+                if let tap = context.eventTapPort {
+                    CGEvent.tapEnable(tap: tap, enable: false)
+                    CFMachPortInvalidate(tap)
+                }
+            }
+            return Unmanaged.passUnretained(event)
+        }
+        // Normal timeout (slow callback) — re-enable tap
+        if let userInfo {
+            let context = Unmanaged<HotkeyContext>.fromOpaque(userInfo).takeUnretainedValue()
+            if let tap = context.eventTapPort {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+        }
         return Unmanaged.passUnretained(event)
     }
 

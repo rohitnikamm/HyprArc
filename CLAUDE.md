@@ -21,7 +21,22 @@ xcodebuild -project HyprArc.xcodeproj -scheme HyprArc test
 # Or: open HyprArc.xcodeproj in Xcode, Cmd+R to run, Cmd+U to test
 ```
 
-Bundle ID: `rohit.HyprArc` | Deployment target: macOS
+Bundle ID: `rohit.HyprArc` | Deployment target: macOS | Category: `public.app-category.utilities`
+
+## Distribution
+
+```bash
+# Build signed + notarized DMG (requires Developer ID certificate + notarytool credentials)
+./scripts/build-dmg.sh
+
+# Build signed DMG without notarization (users right-click → Open on first launch)
+./scripts/build-dmg.sh --skip-notarize
+```
+
+- **ExportOptions.plist**: Developer ID export config (team `26H5KWS9TD`, automatic signing)
+- **scripts/build-dmg.sh**: Full pipeline — archive → Developer ID sign → DMG with Applications symlink → codesign DMG → notarize → staple
+- **Notarization setup** (one-time): `xcrun notarytool store-credentials "HyprArc" --apple-id "..." --team-id "26H5KWS9TD"` (prompts for app-specific password from appleid.apple.com)
+- Output: `build/HyprArc-{version}.dmg`
 
 ## Build Settings
 
@@ -29,7 +44,8 @@ Bundle ID: `rohit.HyprArc` | Deployment target: macOS
 - **LSUIElement**: `YES` (menu bar app, no Dock icon)
 - **Hardened Runtime**: `YES` (required for notarization)
 - **File sync groups**: Xcode auto-compiles new files under `HyprArc/` — no pbxproj edits needed for adding source files
-- **Swift concurrency**: `MainActor` default isolation (Swift 6). Engine types are value types (implicitly `Sendable`). AX/CGEvent callbacks must dispatch to MainActor. Top-level C function pointer callbacks need `nonisolated`. Cross-isolation context objects need `@unchecked Sendable`.
+- **App Category**: `public.app-category.utilities` (set via `INFOPLIST_KEY_LSApplicationCategoryType`)
+- **Swift concurrency**: `MainActor` default isolation (Swift 6). Engine types are value types (implicitly `Sendable`). AX/CGEvent callbacks must dispatch to MainActor. Top-level C function pointer callbacks need `nonisolated`. Cross-isolation context objects need `@unchecked Sendable`. C function bridges via `@_silgen_name` need explicit `nonisolated` to avoid inheriting MainActor. Properties accessed in nonisolated CGEvent/AX callbacks use `nonisolated(unsafe)` (e.g. `lastDragTime`, `tracker`, `registeredBindings`). Value types conforming to MainActor-isolated protocols need `nonisolated init()` for use in default arguments.
 - **Member import visibility**: `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` is enabled — must explicitly `import Combine` when using `@Published`/`ObservableObject`.
 
 ## Architecture
@@ -80,6 +96,9 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Nonisolated Hashable/Equatable**: `KeyBinding` and `ModifierSet` have explicit `nonisolated` conformances to avoid Swift 6 MainActor isolation conflicts in the CGEvent tap callback.
 - **Mouse resize**: No modifier needed — drag directly on split boundary gap. Uses `retileFast()` (skips constraint checks) + frame-diff tracking (only AX calls for changed windows) for smooth performance
 - **Mouse swap**: No modifier needed — drag from window title bar (top 30px) to another window. Orange translucent overlay (`SwapOverlayWindow`) highlights the target during drag. Uses `DispatchQueue.main.async` (not Task) for low-latency mouse event handling
+- **Accessibility permission detection + auto-relaunch**: macOS has no notification for AX permission changes AND caches TCC state per process (`AXIsProcessTrusted()` may never flip to `true` within a running process). Dual detection: `AppDelegate` polls every 1 second with both `AXIsProcessTrusted()` (TCC API) and `AccessibilityHelper.isAXWorking()` (live AX test via `AXUIElementCreateSystemWide()` + `kAXFocusedApplicationAttribute` — bypasses TCC cache). On detection: auto-relaunches the app via `Process("/bin/sh", "sleep 0.5 && open bundlePath")` + `NSApp.terminate()` immediately. Detached shell survives termination, opens fresh instance after 0.5s. (Cannot call `/usr/bin/open` while still running — Launch Services activates existing instance instead of launching new one.) Fresh process gets clean TCC state. `static relaunchApp()` is also callable from "Restart to Activate" button in MenuBarView as manual fallback. `WindowTracker.start()` is idempotent via `isStarted` guard (reset in `stop()`). Config loading starts unconditionally (doesn't need AX). Menu bar shows "Not Granted" + "Grant Permission..." + "Restart to Activate" only when needed — all hidden once granted.
+- **AX revocation watchdog**: When AX permission is revoked mid-session, synchronous AX API calls (`AXUIElementSetAttributeValue`, `AXUIElementCopyAttributeValue`) hang indefinitely — no timeout, no error. The CGEvent tap also silently swallows events when unauthorized (Deskflow #9562 had the same bug). 4-layer defense: (1) CGEvent tap runs on a dedicated `HyprArc.EventTap` background thread (not main) — if main blocks on a hung AX call, the tap still processes events. (2) Watchdog on `DispatchQueue.global(qos: .userInteractive)` polls every 250ms using `HotkeyManager.isEventTapPermitted()` — tries to create a dummy `CGEvent.tapCreate(.listenOnly)`, returns `nil` immediately when permission is revoked (fast, never hangs, bypasses TCC per-process cache — unlike `AXIsProcessTrusted()` which returns stale `true`, or `AXUIElementCopyAttributeValue` which can hang). On detection: disables tap, invalidates MachPort, stops tap run loop, calls `exit(0)`. (3) Per-call `AXIsProcessTrusted()` guards in `AXExtensions.swift` before every AX API call (`getAttribute`, `setAttribute`, `pid`, `windows`, `focusWindow`) and in `WindowTracker.updateFocusedWindow()`. (4) `retileFast()`, `syncAndRetile()`, `retile()` guard on `AXIsProcessTrusted() && !isAXDisabled()`.
+- **Text concatenation (macOS 26)**: The `+` operator on `Text` is deprecated in macOS 26. Use `Text("\(existingText)\(Image(nsImage: img))")` string interpolation instead. Per-segment styling (e.g. `.baselineOffset(-3)` on an icon only) is preserved by styling the `Text` first, then interpolating it: `let iconText = Text(Image(nsImage: icon)).baselineOffset(-3); result = Text("\(result) \(iconText)")`
 
 ## Implementation Progress
 
@@ -105,3 +124,10 @@ Full 14-phase plan at `.claude/plans/steady-wishing-clover.md`. Originally built
 - **Bugfix**: Apple system apps (Calendar, Notes, Reminders) not tiled — relaxed `isTileable` subrole check to accept nil/empty (Apple system apps don't report `kAXStandardWindowSubrole`). ✅
 - **Bugfix**: Float/tile rule changes not applied to running apps — `applyConfigChanges()` now reconciles float/tile state across all workspaces when rules change (tiled windows with new float rule → float immediately, floating windows with removed float rule → re-tile immediately). ✅
 - **Phase 14**: Press-to-record keybinding UI — Raycast-style `KeyRecorderField` with `.popover()`, live modifier badges, error state for naked keys, `NSViewRepresentable` key capture, `isRecordingKeybinding` flag to bypass CGEvent tap. Replaced `DisclosureGroup` with full-width clickable section headers. New file: `KeyRecorderField.swift`. ✅
+- **Phase 15**: Rebrand Rover → HyprArc — all source files, project files, config paths (`~/.config/hyprarc/`), bundle ID (`rohit.HyprArc`), logger subsystems, plan file, memory files migrated to new project directory. ✅
+- **Phase 16**: Distribution — custom app icon (10 sizes via `sips`), `ExportOptions.plist` (Developer ID), `scripts/build-dmg.sh` (archive → sign → notarize → staple → DMG), `.gitignore`, app category `public.app-category.utilities`. ✅
+- **Bugfix**: Build warnings — resolved all 13 Swift 6 concurrency warnings (`nonisolated` on C bridges, `nonisolated(unsafe)` on cross-isolation properties, `nonisolated init()` on DwindleLayout), deprecated `Text` `+` → string interpolation, unused `halfInner` variable removed. Zero warnings in release build. ✅
+- **Bugfix**: Accessibility permission not detected after granting — macOS caches TCC state per process, so `AXIsProcessTrusted()` may never update. Solution: dual polling (`AXIsProcessTrusted()` + live `isAXWorking()` test), auto-relaunch via detached `/bin/sh` process (sleeps 0.5s then opens app) + immediate `NSApp.terminate()`. Cannot use `/usr/bin/open` while still running — Launch Services activates existing instance. "Restart to Activate" button as manual fallback. `WindowTracker.start()` idempotent via `isStarted` guard (reset in `stop()`). `TilingController.accessibilityGranted` as `@Published` for reactive MenuBarView binding. ✅
+- **UI**: Menu bar permission section hidden when granted — "Not Granted" label + "Grant Permission..." + "Restart to Activate" buttons only visible when needed. ✅
+- **Bugfix**: System freeze on AX permission revocation — CGEvent tap silently swallows events when AX permission revoked (Deskflow #9562), and `AXIsProcessTrusted()` returns stale `true` (TCC cache), and `AXUIElementCopyAttributeValue` hangs (even on system-wide element). Fix: 4-layer defense — (1) CGEvent tap on dedicated background thread, (2) watchdog polls 250ms using dummy `CGEvent.tapCreate()` probe (reliable, never hangs, bypasses TCC cache) + `exit(0)`, (3) `AXIsProcessTrusted()` guards before every AX call in AXExtensions + WindowTracker, (4) `isAXDisabled()` guards in TilingController retile methods. ✅
+- **Bugfix**: Auto-relaunch not reopening app — `relaunchApp()` called `/usr/bin/open` while still running; Launch Services activated existing instance instead of launching new one. Fix: detached `/bin/sh` process sleeps 0.5s then opens; app terminates immediately. ✅

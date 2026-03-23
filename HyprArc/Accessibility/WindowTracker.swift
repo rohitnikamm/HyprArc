@@ -16,14 +16,17 @@ class WindowTracker: ObservableObject {
 
     private let logger = Logger(subsystem: "rohit.HyprArc", category: "WindowTracker")
 
+    private var isStarted = false
+
     // MARK: - Lifecycle
 
     func start() {
+        guard !isStarted else { return }
         guard AccessibilityHelper.isTrusted() else {
             logger.warning("Accessibility not granted — cannot track windows")
             return
         }
-
+        isStarted = true
         enumerateExistingWindows()
         observeAppLifecycle()
     }
@@ -45,6 +48,7 @@ class WindowTracker: ObservableObject {
 
         trackedWindows.removeAll()
         focusedWindowID = nil
+        isStarted = false
     }
 
     // MARK: - Full Enumeration
@@ -81,8 +85,9 @@ class WindowTracker: ObservableObject {
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication else { return }
+            guard let tracker = self else { return }
             Task { @MainActor in
-                self?.handleAppLaunched(app)
+                tracker.handleAppLaunched(app)
             }
         }
         workspaceObservers.append(launchToken)
@@ -94,8 +99,9 @@ class WindowTracker: ObservableObject {
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication else { return }
+            guard let tracker = self else { return }
             Task { @MainActor in
-                self?.handleAppTerminated(app)
+                tracker.handleAppTerminated(app)
             }
         }
         workspaceObservers.append(terminateToken)
@@ -105,8 +111,9 @@ class WindowTracker: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            guard let tracker = self else { return }
             Task { @MainActor in
-                self?.updateFocusedWindow()
+                tracker.updateFocusedWindow()
             }
         }
         workspaceObservers.append(activateToken)
@@ -237,6 +244,7 @@ class WindowTracker: ObservableObject {
     }
 
     private func updateFocusedWindow() {
+        guard AXIsProcessTrusted() else { return }
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
         let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
         var focusedValue: AnyObject?
@@ -325,7 +333,7 @@ class WindowTracker: ObservableObject {
 
 /// Carries tracker reference + app metadata through the C callback.
 private final class ObserverContext: @unchecked Sendable {
-    weak var tracker: WindowTracker?
+    nonisolated(unsafe) weak var tracker: WindowTracker?
     let pid: pid_t
     let bundleID: String?
 

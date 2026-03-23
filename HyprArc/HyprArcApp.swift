@@ -43,19 +43,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         dispatcher: CommandDispatcher(tilingController: tilingController, configLoader: configLoader),
         tilingController: tilingController
     )
+    private var permissionTimer: DispatchSourceTimer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if !AccessibilityHelper.isTrusted() {
-            AccessibilityHelper.requestPermission()
-        }
         configLoader.load()
         configLoader.startWatching()
+
+        if AccessibilityHelper.isTrusted() {
+            startServices()
+        } else {
+            AccessibilityHelper.requestPermission()
+            startPermissionPolling()
+        }
+    }
+
+    private func startServices() {
+        tilingController.accessibilityGranted = true
         windowTracker.start()
         tilingController.start()
         hotkeyManager.start()
     }
 
+    private func startPermissionPolling() {
+        // Background queue so polling works even if main thread is blocked
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + 1, repeating: 1.0)
+        timer.setEventHandler { [weak self] in
+            // Dual check: TCC API + live AX test (bypasses per-process cache)
+            if AccessibilityHelper.isTrusted() || AccessibilityHelper.isAXWorking() {
+                self?.permissionTimer?.cancel()
+                self?.permissionTimer = nil
+                Self.relaunchApp()
+            }
+        }
+        timer.resume()
+        permissionTimer = timer
+    }
+
+    /// Relaunch the app for clean AX initialization after permission is granted.
+    /// macOS caches TCC state per process — a relaunch ensures fresh state.
+    /// Terminates first, then a detached shell process reopens the app after 0.5s.
+    /// (Opening while still running makes Launch Services activate the existing instance instead.)
+    static func relaunchApp() {
+        let bundlePath = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 0.5 && open \"\(bundlePath)\""]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        permissionTimer?.cancel()
+        permissionTimer = nil
         hotkeyManager.stop()
         configLoader.stopWatching()
         tilingController.workspaceManager.restoreAllWindows()

@@ -5,23 +5,26 @@ struct MenuBarView: View {
     @ObservedObject var windowTracker: WindowTracker
     @ObservedObject var tilingController: TilingController
     var configLoader: ConfigLoader
-    @State private var accessibilityGranted = AccessibilityHelper.isTrusted()
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            spacedLabel(
-                accessibilityGranted ? "Accessibility: Granted" : "Accessibility: Not Granted",
-                systemImage: accessibilityGranted ? "checkmark.shield.fill" : "xmark.shield.fill"
-            )
+            if !tilingController.accessibilityGranted {
+                spacedLabel(
+                    "Accessibility: Not Granted",
+                    systemImage: "xmark.shield.fill"
+                )
 
-            if !accessibilityGranted {
                 Button("Grant Permission…") {
                     AccessibilityHelper.requestPermission()
                 }
-            }
 
-            Divider()
+                Button("Restart to Activate") {
+                    AppDelegate.relaunchApp()
+                }
+
+                Divider()
+            }
 
             Button {
                 tilingController.isEnabled.toggle()
@@ -82,16 +85,13 @@ struct MenuBarView: View {
             .keyboardShortcut("q")
         }
         .padding(4)
-        .onAppear {
-            accessibilityGranted = AccessibilityHelper.isTrusted()
-        }
     }
 
     /// Build a label with an invisible spacer to match workspace row height.
     private func spacedLabel(_ title: String, systemImage: String) -> some View {
         Label {
             let spacer = NSImage(size: NSSize(width: 1, height: 14))
-            Text(title) + Text(Image(nsImage: spacer))
+            Text("\(title)\(Image(nsImage: spacer))")
         } icon: {
             Image(systemName: systemImage)
         }
@@ -105,11 +105,12 @@ struct MenuBarView: View {
         // Invisible spacer image to normalize row height across all workspaces
         // (prevents NSMenu tracking rect misalignment when some rows have icons and others don't)
         let spacer = NSImage(size: NSSize(width: 1, height: 14))
-        result = result + Text(Image(nsImage: spacer))
+        result = Text("\(result)\(Image(nsImage: spacer))")
 
         for app in apps {
             let icon = retinaIcon(app.icon, size: 14)
-            result = result + Text(" ") + Text(Image(nsImage: icon)).baselineOffset(-3)
+            let iconText = Text(Image(nsImage: icon)).baselineOffset(-3)
+            result = Text("\(result) \(iconText)")
         }
 
         return result

@@ -1,0 +1,19 @@
+# Build output
+build/
+DerivedData/
+*.dmg
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Playwright MCP
+.playwright-mcp/
+
+# Misc
+*.ipa
+*.dSYM.zip
+*.dSYM

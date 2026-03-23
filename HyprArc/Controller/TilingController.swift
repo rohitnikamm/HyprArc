@@ -1,3 +1,4 @@
+import ApplicationServices
 import AppKit
 import Combine
 import CoreGraphics
@@ -19,6 +20,7 @@ class TilingController: ObservableObject {
     }
     @Published var layoutName: String = "Dwindle"
     @Published var activeWorkspaceID: Int = 1
+    @Published var accessibilityGranted: Bool = AccessibilityHelper.isTrusted()
 
     let workspaceManager: WorkspaceManager
     let configLoader: ConfigLoader
@@ -108,6 +110,7 @@ class TilingController: ObservableObject {
 
     /// Apply layout and engine settings from config to all workspaces.
     private func applyConfigChanges(_ config: HyprArcConfig) {
+        guard AXIsProcessTrusted() else { return }
         let wantsMasterStack = config.general.defaultLayout == "master-stack"
         let currentIsMasterStack = workspaceManager.activeWorkspace.engine is MasterStackLayout
 
@@ -225,7 +228,7 @@ class TilingController: ObservableObject {
         // Suppress sync during active mouse resize/swap to prevent feedback loops
         // (setting frames triggers AXObserver which triggers syncAndRetile)
         guard !isResizing && !isSwapping else { return }
-        guard isEnabled else { return }
+        guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled() else { return }
 
         // Refresh window properties before filtering
         for windowID in windowTracker.trackedWindows.keys {
@@ -309,7 +312,7 @@ class TilingController: ObservableObject {
     /// Constraint-aware: adjusts split ratios for windows with minimum size constraints.
     private func retile() {
         let ws = workspaceManager.activeWorkspace
-        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+        guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled(), !ws.windowIDs.isEmpty else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
         let gaps = currentGaps
@@ -355,7 +358,7 @@ class TilingController: ObservableObject {
     /// and only applies AX calls for frames that actually changed.
     private func retileFast() {
         let ws = workspaceManager.activeWorkspace
-        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+        guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled(), !ws.windowIDs.isEmpty else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
@@ -393,6 +396,7 @@ class TilingController: ObservableObject {
     // MARK: - Focus Navigation
 
     func focusDirection(_ direction: Direction) {
+        guard AXIsProcessTrusted() else { return }
         guard let focused = windowTracker.focusedWindowID,
               workspaceManager.activeWorkspace.windowIDs.contains(focused) else { return }
 
@@ -456,6 +460,7 @@ class TilingController: ObservableObject {
     // MARK: - Workspace Operations
 
     func switchToWorkspace(_ id: Int) {
+        guard AXIsProcessTrusted() else { return }
         workspaceManager.switchToWorkspace(id)
         activeWorkspaceID = workspaceManager.activeWorkspaceID
 
@@ -488,6 +493,7 @@ class TilingController: ObservableObject {
     }
 
     func moveWindowToWorkspace(_ targetID: Int) {
+        guard AXIsProcessTrusted() else { return }
         guard let focused = windowTracker.focusedWindowID else { return }
         workspaceManager.moveWindowToWorkspace(focused, workspace: targetID)
         retile()

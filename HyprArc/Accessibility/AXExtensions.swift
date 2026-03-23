@@ -6,6 +6,7 @@ extension AXUIElement {
     // MARK: - Generic Attribute Access
 
     func getAttribute<T>(_ attribute: String) -> T? {
+        guard AXIsProcessTrusted() else { return nil }
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(self, attribute as CFString, &value)
         guard result == .success else { return nil }
@@ -13,7 +14,8 @@ extension AXUIElement {
     }
 
     func setAttribute(_ attribute: String, value: CFTypeRef) -> Bool {
-        AXUIElementSetAttributeValue(self, attribute as CFString, value) == .success
+        guard AXIsProcessTrusted() else { return false }
+        return AXUIElementSetAttributeValue(self, attribute as CFString, value) == .success
     }
 
     // MARK: - Window ID
@@ -54,6 +56,7 @@ extension AXUIElement {
     }
 
     var pid: pid_t? {
+        guard AXIsProcessTrusted() else { return nil }
         var pid: pid_t = 0
         let result = AXUIElementGetPid(self, &pid)
         return result == .success ? pid : nil
@@ -108,6 +111,7 @@ extension AXUIElement {
     // MARK: - Window List
 
     var windows: [AXUIElement] {
+        guard AXIsProcessTrusted() else { return [] }
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(self, kAXWindowsAttribute as CFString, &value)
         guard result == .success, let array = value as? [AXUIElement] else { return [] }
@@ -117,6 +121,7 @@ extension AXUIElement {
     // MARK: - Focus
 
     func focusWindow() {
+        guard AXIsProcessTrusted() else { return }
         // Activate the owning app FIRST so it comes to front,
         // then raise the window and set AX focus attributes.
         if let pid {

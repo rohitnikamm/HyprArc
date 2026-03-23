@@ -131,7 +131,6 @@ struct MasterStackLayout: TilingEngine {
         _ rect: CGRect, gaps: GapConfig
     ) -> (master: CGRect, stack: CGRect) {
         let outer = gaps.outer
-        let halfInner = gaps.inner / 2
 
         switch orientation {
         case .left:
