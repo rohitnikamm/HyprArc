@@ -4,31 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rover is a **dynamic tiling window manager for macOS**, inspired by Hyprland. The key differentiator from AeroSpace (the closest existing macOS WM) is that Rover uses **automatic layout algorithms** (dwindle, master-stack) rather than manual i3-style tree construction. Users choose a strategy; Rover builds the tree.
+HyprArc is a **dynamic tiling window manager for macOS**, inspired by Hyprland. The key differentiator from AeroSpace (the closest existing macOS WM) is that HyprArc uses **automatic layout algorithms** (dwindle, master-stack) rather than manual i3-style tree construction. Users choose a strategy; HyprArc builds the tree.
 
 ## Build & Run
 
 ```bash
 # Build (Debug)
-xcodebuild -project Rover.xcodeproj -scheme Rover -configuration Debug build
+xcodebuild -project HyprArc.xcodeproj -scheme HyprArc -configuration Debug build
 
 # Build (Release)
-xcodebuild -project Rover.xcodeproj -scheme Rover -configuration Release build
+xcodebuild -project HyprArc.xcodeproj -scheme HyprArc -configuration Release build
 
 # Run tests
-xcodebuild -project Rover.xcodeproj -scheme Rover test
+xcodebuild -project HyprArc.xcodeproj -scheme HyprArc test
 
-# Or: open Rover.xcodeproj in Xcode, Cmd+R to run, Cmd+U to test
+# Or: open HyprArc.xcodeproj in Xcode, Cmd+R to run, Cmd+U to test
 ```
 
-Bundle ID: `rohit.Rover` | Deployment target: macOS
+Bundle ID: `rohit.HyprArc` | Deployment target: macOS
 
 ## Build Settings
 
 - **App Sandbox**: `NO` (required — sandbox blocks Accessibility API)
 - **LSUIElement**: `YES` (menu bar app, no Dock icon)
 - **Hardened Runtime**: `YES` (required for notarization)
-- **File sync groups**: Xcode auto-compiles new files under `Rover/` — no pbxproj edits needed for adding source files
+- **File sync groups**: Xcode auto-compiles new files under `HyprArc/` — no pbxproj edits needed for adding source files
 - **Swift concurrency**: `MainActor` default isolation (Swift 6). Engine types are value types (implicitly `Sendable`). AX/CGEvent callbacks must dispatch to MainActor. Top-level C function pointer callbacks need `nonisolated`. Cross-isolation context objects need `@unchecked Sendable`.
 - **Member import visibility**: `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` is enabled — must explicitly `import Combine` when using `@Published`/`ObservableObject`.
 
@@ -55,7 +55,7 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 | `Controller/` | `TilingController` orchestrator + `ScreenHelper` coordinate conversion |
 | `Workspace/` | Virtual workspace management (9 workspaces, hide via offscreen move) |
 | `Hotkeys/` | Global hotkey registration via `CGEvent.tapCreate`, `KeyBinding` model (with `parse()`/`toString()` for config strings), `CommandDispatcher` (loads bindings from config) |
-| `Config/` | TOML config at `~/.config/rover/config.toml` with hot-reload via `DispatchSource`, `TOMLSerializer` for saving, `ConfigLoader` with debounced `save()` |
+| `Config/` | TOML config at `~/.config/hyprarc/config.toml` with hot-reload via `DispatchSource`, `TOMLSerializer` for saving, `ConfigLoader` with debounced `save()` |
 | `UI/` | `MenuBarView` dropdown (workspace rows with inline app icons via `Text(Image(nsImage:))`), `SettingsView` (NavigationSplitView sidebar: General, Gaps, Layouts, Keybindings, Window Rules), `SwapOverlayWindow` |
 
 ### Technical Decisions
@@ -66,11 +66,11 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 - **Coordinate conversion** centralized in `ScreenHelper`: NSScreen (bottom-left origin) → AX (top-left origin): `axY = totalScreenHeight - nsY - height`
 - **`_AXUIElementGetWindow`** private API isolated in `AXPrivateAPIs.swift` — single swap point if Apple ever removes it
 - **Debouncing**: All retile operations use cancel-and-reschedule `DispatchWorkItem` with 50ms delay. AX destruction notifications extract `windowID` synchronously in the C callback before async MainActor dispatch (element becomes invalid after async hop). `syncAndRetile()` also prunes windows with invalid AX elements (`role == nil`) as a safety net against ghost windows.
-- **Constraint-aware tiling**: macOS apps enforce their own minimum sizes (unlike Wayland where compositors have absolute authority). Rover queries `kAXMinimumSizeAttribute` and auto-adjusts split ratios so windows respect their minimums without overlap.
+- **Constraint-aware tiling**: macOS apps enforce their own minimum sizes (unlike Wayland where compositors have absolute authority). HyprArc queries `kAXMinimumSizeAttribute` and auto-adjusts split ratios so windows respect their minimums without overlap.
 - **Electron ghost window filtering**: `hasCloseButton` check filters out internal "Browser" helper windows from Electron apps (VSCode, Slack, etc.)
 - **Apple system app tiling**: `isTileable` accepts windows with subrole `kAXStandardWindowSubrole` OR nil/empty — Apple system apps (Calendar, Notes, Reminders) don't report a subrole (known macOS AX limitation, yabai #2629). Dialogs/sheets/floating windows still rejected since they report explicit non-standard subroles.
 - **SwiftUI** for settings UI; core WM logic is framework-agnostic
-- **MenuBarExtra observation**: `@ObservedObject` doesn't work in `RoverApp` via `appDelegate` chain — use a dedicated `MenuBarLabel` View with its own `@ObservedObject` to observe `TilingController`'s `@Published` properties
+- **MenuBarExtra observation**: `@ObservedObject` doesn't work in `HyprArcApp` via `appDelegate` chain — use a dedicated `MenuBarLabel` View with its own `@ObservedObject` to observe `TilingController`'s `@Published` properties
 - **Settings window**: `Window(id: "settings")` scene with `.windowStyle(.automatic)` alongside `MenuBarExtra`. Uses `NavigationSplitView` with sidebar (System Settings pattern). Liquid Glass via `.containerBackground(.thinMaterial, for: .window)` + `.scrollContentBackground(.hidden)` on all Forms/Lists + `.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)`. Two-way sync between UI and config file. Uses `LabeledContent`, `DisclosureGroup`, `ContentUnavailableView` per Apple HIG. Inline reset confirmation in sidebar — button morphs/splits into [Cancel][Reset] with animated frame expansion (no modal alert). Text swap uses `.animation(nil)` to prevent overflow during size transition. Auto-dismisses after 5 seconds. Window Rules uses `ScrollView`+`VStack` (not `List`) for animated row insertion/deletion — macOS `List` (NSTableView-backed) doesn't support SwiftUI ForEach animations. Each rule has stable `UUID` identity and `.transition(.move(edge: .bottom).combined(with: .opacity))`. Custom `SlidingPicker` component replaces `.pickerStyle(.segmented)` — uses `matchedGeometryEffect` for a sliding pill highlight between options. Uses local `@State` for animation (Binding setters with `DispatchQueue.main.async` break animation context). Slider labels highlight with accent color + medium weight while dragging via debounced `.onChange`. Sidebar uses custom `VStack` (not `List`) with sliding hover highlight via `matchedGeometryEffect` — debounced `.onHover` per item (50ms nil delay prevents jitter), `.allowsHitTesting(false)` on the highlight prevents it from triggering hover events during animation. Haptics via `NSHapticFeedbackManager` (not `.sensoryFeedback` — doesn't trigger trackpad on macOS): sliders use `.levelChange` (notch feel), SlidingPicker uses `.alignment` (snap), reset + delete use `.generic`. Selective per Arc/Raycast philosophy — no haptics on sidebar clicks or rule adds.
 - **Mouse events blocked during Settings**: `beginResize()` and `beginSwap()` guard `NSApp.keyWindow == nil` — prevents mouse resize/swap from passing through the Settings window to tiled windows below.
 - **SwiftUI Binding async pattern**: All `Binding` setters in `SettingsView` wrap `@Published` mutations in `DispatchQueue.main.async` to avoid "Publishing changes from within view updates" warnings. Without this, SwiftUI triggers undefined behavior when Picker/Slider values change.
@@ -83,7 +83,7 @@ AX Events → TilingController → TilingEngine.calculateFrames() → LayoutResu
 
 ## Implementation Progress
 
-Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
+Full 14-phase plan at `.claude/plans/steady-wishing-clover.md`. Originally built as "Rover", rebranded to "HyprArc" (March 2026).
 
 - **Phase 1**: Menu bar app + AX permissions ✅
 - **Phase 2**: Window detection & tracking ✅
@@ -95,7 +95,7 @@ Full 10-phase plan at `.claude/plans/steady-wishing-clover.md`.
 - **Phase 8**: Virtual workspaces (1–9, offscreen hiding) ✅
 - **Phase 9**: Global hotkeys (CGEvent tap, Hyprland bindings) ✅
 - **Phase 9.5**: Mouse-driven resize (drag boundary) & swap (drag title bar, orange overlay) ✅
-- **Phase 10**: Config system (TOML at `~/.config/rover/config.toml`, hot-reload) ✅
+- **Phase 10**: Config system (TOML at `~/.config/hyprarc/config.toml`, hot-reload) ✅
 - **Phase 10.5**: Settings UI + configurable hotkeys + all config settings wired up (layout switching, split/master ratios, orientation, window rules auto-float) + reset to defaults ✅
 - **Phase 11**: Settings UI redesign — NavigationSplitView sidebar, Apple HIG, Liquid Glass, mouse-through fix, microinteractions (inline reset morph, animated window rules rows, slider highlight, sliding pill picker, sidebar hover highlight), selective haptics (NSHapticFeedbackManager) ✅
 - **Phase 12**: Menu bar workspace app icons — replaced verbose Windows list + bullet indicators with inline app icons per workspace. Icons resolved from `bundleID` via `NSWorkspace.shared.urlForApplication`. Uses `Text(Image(nsImage:))` for inline rendering (macOS NSMenu reorders standalone `Image` views). 14x14pt icons rendered at 4x pixel density (56x56px) via `NSBitmapImageRep` for Retina sharpness — `Text(Image(nsImage:))` rasterizes at 1x without this. `.baselineOffset(-3)`. Invisible 1x14 spacer image in ALL rows normalizes NSMenu tracking rects (fixes off-by-one hover misalignment). `objectWillChange.send()` in `syncAndRetile()` for live updates. `spacedLabel()` helper applies the same spacer to non-workspace rows (Settings, Quit, Tiling, Layout, Reload) so ALL menu items have uniform tracking rects. ✅
