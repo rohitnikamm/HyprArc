@@ -79,6 +79,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @ObservedObject var configLoader: ConfigLoader
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedSection: SettingsSection = .general
     @State private var hoveredSection: SettingsSection?
     @State private var hoverDebounceTask: DispatchWorkItem?
@@ -104,7 +105,7 @@ struct SettingsView: View {
                                         .fill(Color.accentColor)
                                 } else if hoveredSection == section {
                                     RoundedRectangle(cornerRadius: 6)
-                                        .fill(.white.opacity(0.08))
+                                        .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.08))
                                         .matchedGeometryEffect(id: "hover", in: hoverNamespace)
                                         .allowsHitTesting(false)
                                 }

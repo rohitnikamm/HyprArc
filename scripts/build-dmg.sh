@@ -27,7 +27,7 @@ NOTARY_PROFILE="HyprArc"
 # Extract version from Xcode project
 VERSION=$(xcodebuild -project "$PROJECT_DIR/HyprArc.xcodeproj" -scheme HyprArc -showBuildSettings 2>/dev/null | grep MARKETING_VERSION | tr -d ' ' | cut -d= -f2)
 VERSION="${VERSION:-1.0}"
-DMG_NAME="HyprArc-${VERSION}.dmg"
+DMG_NAME="HyprArc.dmg"
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 
 echo "══════════════════════════════════════"
@@ -78,7 +78,7 @@ mkdir -p "$DMG_STAGING"
 cp -R "$APP_PATH" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-# Create DMG
+# Create compressed read-only DMG
 hdiutil create \
     -volname "HyprArc" \
     -srcfolder "$DMG_STAGING" \
