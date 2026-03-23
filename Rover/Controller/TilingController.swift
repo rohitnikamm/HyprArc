@@ -174,6 +174,32 @@ class TilingController: ObservableObject {
                 logger.debug("Reassigned window \(windowID) from workspace \(wsID) to \(targetID) (config change)")
             }
         }
+
+        // Reconcile float/tile state for all managed windows (handles rule changes)
+        for i in workspaceManager.workspaces.indices {
+            let tiledIDs = workspaceManager.workspaces[i].windowIDs
+            let floatingIDs = workspaceManager.workspaces[i].floatingWindowIDs
+
+            for windowID in tiledIDs {
+                let bundleID = windowTracker.trackedWindows[windowID]?.bundleID
+                if shouldFloat(bundleID: bundleID) {
+                    workspaceManager.workspaces[i].engine.removeWindow(windowID)
+                    workspaceManager.workspaces[i].windowIDs.remove(windowID)
+                    workspaceManager.workspaces[i].floatingWindowIDs.insert(windowID)
+                    logger.debug("Auto-floated window \(windowID) (rule change)")
+                }
+            }
+
+            for windowID in floatingIDs {
+                let bundleID = windowTracker.trackedWindows[windowID]?.bundleID
+                if !shouldFloat(bundleID: bundleID) {
+                    workspaceManager.workspaces[i].floatingWindowIDs.remove(windowID)
+                    workspaceManager.workspaces[i].engine.insertWindow(windowID, afterFocused: nil)
+                    workspaceManager.workspaces[i].windowIDs.insert(windowID)
+                    logger.debug("Auto-unfloated window \(windowID) (rule change)")
+                }
+            }
+        }
     }
 
     /// Check if a window should be auto-floated based on window rules.

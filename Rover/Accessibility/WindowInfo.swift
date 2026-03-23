@@ -21,7 +21,9 @@ struct WindowInfo {
     /// by requiring a close button — real windows have one, Electron helpers don't.
     var isTileable: Bool {
         role == kAXWindowRole as String
-            && subrole == kAXStandardWindowSubrole as String
+            && (subrole == kAXStandardWindowSubrole as String
+                || subrole == nil
+                || subrole?.isEmpty == true)
             && hasCloseButton
             && !isMinimized
             && !isFullscreen
