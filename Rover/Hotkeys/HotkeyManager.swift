@@ -1,6 +1,10 @@
 import CoreGraphics
 import os
 
+/// Flag checked by the CGEvent callback to pass through keys during recording.
+/// Set by KeyCaptureNSView when recording a keybinding in Settings.
+nonisolated(unsafe) var isRecordingKeybinding = false
+
 /// Manages a CGEvent tap for intercepting global keyboard shortcuts
 /// and mouse events (Opt+drag for resize, Opt+Shift+drag for swap).
 @MainActor
@@ -111,6 +115,11 @@ nonisolated private func hotkeyCallback(
     // MARK: - Keyboard Events
 
     if type == .keyDown {
+        // Pass through all keys during keybinding recording in Settings
+        if isRecordingKeybinding {
+            return Unmanaged.passUnretained(event)
+        }
+
         // Fast guard: at least one modifier must be pressed to match any binding
         let hasAnyModifier = flags.contains(.maskAlternate)
             || flags.contains(.maskShift)

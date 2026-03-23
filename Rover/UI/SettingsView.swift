@@ -639,27 +639,35 @@ private struct KeybindingsTab: View {
     var body: some View {
         List {
             ForEach(groups, id: \.title) { group in
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { expandedGroups.contains(group.title) },
-                        set: { isExpanded in
-                            if isExpanded {
-                                expandedGroups.insert(group.title)
-                            } else {
-                                expandedGroups.remove(group.title)
+                Section {
+                    if expandedGroups.contains(group.title) {
+                        ForEach(group.commands, id: \.self) { command in
+                            LabeledContent(displayName(for: command)) {
+                                KeyRecorderField(command: command, configLoader: configLoader)
                             }
                         }
-                    )
-                ) {
-                    ForEach(group.commands, id: \.self) { command in
-                        LabeledContent(displayName(for: command)) {
-                            TextField("e.g. opt+h", text: bindingForCommand(command))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 160)
-                        }
                     }
-                } label: {
-                    Text(group.title)
+                } header: {
+                    Button {
+                        withAnimation(.smooth(duration: 0.2)) {
+                            if expandedGroups.contains(group.title) {
+                                expandedGroups.remove(group.title)
+                            } else {
+                                expandedGroups.insert(group.title)
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .rotationEffect(.degrees(expandedGroups.contains(group.title) ? 90 : 0))
+                                .animation(.smooth(duration: 0.2), value: expandedGroups)
+                            Text(group.title)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -668,21 +676,5 @@ private struct KeybindingsTab: View {
 
     private func displayName(for command: String) -> String {
         command.replacingOccurrences(of: "-", with: " ").capitalized
-    }
-
-    private func bindingForCommand(_ command: String) -> Binding<String> {
-        Binding(
-            get: {
-                configLoader.config.keybindings.bindings[command]
-                    ?? RoverConfig.KeybindingsConfig.defaults[command]
-                    ?? ""
-            },
-            set: { newValue in
-                DispatchQueue.main.async {
-                    configLoader.config.keybindings.bindings[command] = newValue
-                    configLoader.save()
-                }
-            }
-        )
     }
 }

@@ -108,6 +108,22 @@ extension KeyBinding: Equatable, Hashable {
         parts.append(keyCodeToName[keyCode] ?? "unknown")
         return parts.joined(separator: "+")
     }
+
+    /// Display string using macOS symbol characters (e.g., "⌃⌥⇧H").
+    func toDisplayString() -> String {
+        var symbols = ""
+        if modifiers.control { symbols += "⌃" }
+        if modifiers.option { symbols += "⌥" }
+        if modifiers.shift { symbols += "⇧" }
+        if modifiers.command { symbols += "⌘" }
+        let keyName = keyCodeToName[keyCode]?.uppercased() ?? "?"
+        return symbols + keyName
+    }
+
+    /// Whether at least one modifier key is held.
+    var hasModifier: Bool {
+        modifiers.option || modifiers.shift || modifiers.command || modifiers.control
+    }
 }
 
 // MARK: - Key Code Constants
