@@ -51,6 +51,9 @@ protocol TilingEngine: Sendable {
     /// Swap two windows' positions in the layout data structure.
     mutating func swapWindows(_ a: WindowID, _ b: WindowID)
 
-    /// Resize the split ratio at the given window's split point.
-    mutating func resizeSplit(at id: WindowID, delta: CGFloat)
+    /// Resize the split ratio. When `axis` is provided, targets the nearest ancestor split
+    /// matching that axis. When nil, targets the window's immediate parent split.
+    /// Rect + gaps are needed to calculate actual split directions (dwindle determines direction
+    /// from aspect ratio at each level, not from stored tree data).
+    mutating func resizeSplit(at id: WindowID, delta: CGFloat, axis: SplitDirection?, in rect: CGRect, gaps: GapConfig)
 }

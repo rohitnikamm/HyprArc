@@ -5,6 +5,11 @@ import CoreGraphics
 indirect enum DwindleNode: Sendable {
     case leaf(WindowID)
     case split(SplitNode)
+
+    func isLeaf(_ id: WindowID) -> Bool {
+        if case .leaf(let wid) = self { return wid == id }
+        return false
+    }
 }
 
 /// An internal node that splits space between two children.
@@ -219,35 +224,46 @@ struct DwindleLayout: TilingEngine {
 
     // MARK: - Resize
 
-    mutating func resizeSplit(at id: WindowID, delta: CGFloat) {
+    mutating func resizeSplit(at id: WindowID, delta: CGFloat, axis: SplitDirection?, in rect: CGRect, gaps: GapConfig) {
         guard let root else { return }
-        self.root = resizeInTree(at: id, delta: delta, in: root)
+        self.root = resizeInTree(at: id, delta: delta, axis: axis, in: root, rect: rect, gaps: gaps, isRoot: true)
     }
 
-    /// Find the split node that is the parent of the given window and adjust its ratio.
-    private func resizeInTree(at id: WindowID, delta: CGFloat, in node: DwindleNode) -> DwindleNode {
+    /// Find the ancestor split containing the window and adjust its ratio.
+    /// Calculates actual direction from rect aspect ratio (matching calculateFrames logic)
+    /// instead of relying on the stale stored direction.
+    private func resizeInTree(at id: WindowID, delta: CGFloat, axis: SplitDirection?, in node: DwindleNode, rect: CGRect, gaps: GapConfig, isRoot: Bool) -> DwindleNode {
         switch node {
         case .leaf:
             return node
-
         case .split(var splitNode):
-            // Check if either direct child is the target leaf
-            let firstContains = containsWindow(id, in: splitNode.first)
-            let secondContains = containsWindow(id, in: splitNode.second)
+            let inFirst = containsWindow(id, in: splitNode.first)
+            let inSecond = containsWindow(id, in: splitNode.second)
 
-            if firstContains && !secondContains {
-                // Target is in first child
-                if case .leaf(let wid) = splitNode.first, wid == id {
-                    // Direct child — adjust this split's ratio
-                    splitNode.ratio = clampRatio(splitNode.ratio + delta)
+            guard inFirst != inSecond else { return .split(splitNode) }
+
+            // Calculate ACTUAL direction from rect (same as calculateFrames)
+            let actualDirection: SplitDirection = rect.width > rect.height ? .horizontal : .vertical
+
+            let shouldModify: Bool
+            if let axis {
+                shouldModify = (actualDirection == axis)
+            } else {
+                shouldModify = inFirst ? splitNode.first.isLeaf(id) : splitNode.second.isLeaf(id)
+            }
+
+            if shouldModify {
+                let sign: CGFloat = inFirst ? 1 : -1
+                splitNode.ratio = clampRatio(splitNode.ratio + sign * delta)
+            } else {
+                // Calculate child rects for recursion (same as calculateFrames)
+                let (firstRect, secondRect) = splitRect(
+                    rect, direction: actualDirection, ratio: splitNode.ratio, gaps: gaps, isRoot: isRoot)
+
+                if inFirst {
+                    splitNode.first = resizeInTree(at: id, delta: delta, axis: axis, in: splitNode.first, rect: firstRect, gaps: gaps, isRoot: false)
                 } else {
-                    splitNode.first = resizeInTree(at: id, delta: delta, in: splitNode.first)
-                }
-            } else if secondContains && !firstContains {
-                if case .leaf(let wid) = splitNode.second, wid == id {
-                    splitNode.ratio = clampRatio(splitNode.ratio - delta)
-                } else {
-                    splitNode.second = resizeInTree(at: id, delta: delta, in: splitNode.second)
+                    splitNode.second = resizeInTree(at: id, delta: delta, axis: axis, in: splitNode.second, rect: secondRect, gaps: gaps, isRoot: false)
                 }
             }
 

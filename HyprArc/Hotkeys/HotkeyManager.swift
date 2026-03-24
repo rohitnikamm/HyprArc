@@ -252,10 +252,12 @@ nonisolated private func hotkeyCallback(
         let location = event.location
 
         DispatchQueue.main.async {
-            if context.tilingController.windowAtTitleBar(point: location) != nil {
-                context.tilingController.beginSwap(at: location)
-            } else {
+            // Check split boundary FIRST — the boundary between stacked windows
+            // overlaps the bottom window's title bar region, so boundary must take priority.
+            if context.tilingController.splitBoundaryAt(point: location) != nil {
                 context.tilingController.beginResize(at: location)
+            } else if context.tilingController.windowAtTitleBar(point: location) != nil {
+                context.tilingController.beginSwap(at: location)
             }
         }
 

@@ -327,7 +327,7 @@ struct DwindleResizeTests {
         let before = layout.calculateFrames(in: screenRect, gaps: .zero)
         let width1Before = before.frames[1]!.width
 
-        layout.resizeSplit(at: 1, delta: 0.1)
+        layout.resizeSplit(at: 1, delta: 0.1, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         let after = layout.calculateFrames(in: screenRect, gaps: .zero)
         let width1After = after.frames[1]!.width
@@ -344,7 +344,7 @@ struct DwindleResizeTests {
         let before = layout.calculateFrames(in: screenRect, gaps: .zero)
         let width1Before = before.frames[1]!.width
 
-        layout.resizeSplit(at: 1, delta: -0.1)
+        layout.resizeSplit(at: 1, delta: -0.1, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         let after = layout.calculateFrames(in: screenRect, gaps: .zero)
         let width1After = after.frames[1]!.width
@@ -359,7 +359,7 @@ struct DwindleResizeTests {
         layout.insertWindow(2, afterFocused: 1)
 
         // Try to resize way past the minimum
-        layout.resizeSplit(at: 1, delta: -0.9)
+        layout.resizeSplit(at: 1, delta: -0.9, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         let result = layout.calculateFrames(in: screenRect, gaps: .zero)
         let frame1 = result.frames[1]!
@@ -375,7 +375,7 @@ struct DwindleResizeTests {
         layout.insertWindow(2, afterFocused: 1)
 
         // Try to resize way past the maximum
-        layout.resizeSplit(at: 1, delta: 0.9)
+        layout.resizeSplit(at: 1, delta: 0.9, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         let result = layout.calculateFrames(in: screenRect, gaps: .zero)
         let frame2 = result.frames[2]!

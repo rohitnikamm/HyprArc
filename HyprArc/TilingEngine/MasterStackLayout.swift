@@ -236,8 +236,8 @@ struct MasterStackLayout: TilingEngine {
 
     // MARK: - Resize
 
-    mutating func resizeSplit(at id: WindowID, delta: CGFloat) {
-        // In master-stack, resize adjusts the master ratio
+    mutating func resizeSplit(at id: WindowID, delta: CGFloat, axis: SplitDirection?, in rect: CGRect, gaps: GapConfig) {
+        // Master-stack has a single split — axis/rect/gaps unused
         if masterWindows.contains(id) {
             masterRatio = min(max(masterRatio + delta, 0.1), 0.9)
         } else if stackWindows.contains(id) {

@@ -285,7 +285,7 @@ struct MasterStackResizeTests {
         layout.insertWindow(2, afterFocused: nil)
 
         let before = layout.masterRatio
-        layout.resizeSplit(at: 1, delta: 0.1)
+        layout.resizeSplit(at: 1, delta: 0.1, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         #expect(layout.masterRatio > before)
     }
@@ -297,7 +297,7 @@ struct MasterStackResizeTests {
         layout.insertWindow(2, afterFocused: nil)
 
         let before = layout.masterRatio
-        layout.resizeSplit(at: 2, delta: 0.1)
+        layout.resizeSplit(at: 2, delta: 0.1, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
 
         #expect(layout.masterRatio < before)
     }
@@ -308,10 +308,10 @@ struct MasterStackResizeTests {
         layout.insertWindow(1, afterFocused: nil)
         layout.insertWindow(2, afterFocused: nil)
 
-        layout.resizeSplit(at: 1, delta: 0.9)
+        layout.resizeSplit(at: 1, delta: 0.9, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
         #expect(layout.masterRatio <= 0.9)
 
-        layout.resizeSplit(at: 1, delta: -0.9)
+        layout.resizeSplit(at: 1, delta: -0.9, axis: nil, in: CGRect(x: 0, y: 0, width: 1920, height: 1080), gaps: GapConfig(inner: 0, outer: 0))
         #expect(layout.masterRatio >= 0.1)
     }
 }

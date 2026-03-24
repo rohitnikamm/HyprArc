@@ -104,8 +104,37 @@ extension AXUIElement {
     }
 
     func setFrame(_ rect: CGRect) {
+        // Size → Position → Size ordering (from AeroSpace/yabai).
+        // First setSize establishes the anchor, setPosition moves with correct size,
+        // second setSize corrects any drift from the position change.
+        setSize(rect.size)
         setPosition(rect.origin)
         setSize(rect.size)
+    }
+
+    // MARK: - Animation Control
+
+    /// Temporarily disables macOS window resize/move animations for this app element.
+    /// Used by AeroSpace, yabai, and Rectangle ("undocumented magic").
+    /// `kAXEnhancedUserInterfaceAttribute` controls whether the app animates AX-driven
+    /// frame changes — disabling it makes setPosition/setSize return faster.
+    static func disableAnimations(for pid: pid_t, _ body: () -> Void) {
+        guard AXIsProcessTrusted() else { body(); return }
+        let app = AXUIElementCreateApplication(pid)
+        var value: AnyObject?
+        let wasEnabled: Bool
+        if AXUIElementCopyAttributeValue(app, "AXEnhancedUserInterface" as CFString, &value) == .success {
+            wasEnabled = (value as? Bool) ?? false
+        } else {
+            wasEnabled = false
+        }
+        if wasEnabled {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+        }
+        body()
+        if wasEnabled {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
     }
 
     // MARK: - Window List

@@ -331,12 +331,12 @@ class TilingController: ObservableObject {
             if widthViolation || heightViolation {
                 if heightViolation && frame.height > 0 {
                     let delta = (minSize.height - frame.height) / screenRect.height
-                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
+                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta, axis: .vertical, in: screenRect, gaps: gaps)
                     adjusted = true
                 }
                 if widthViolation && frame.width > 0 {
                     let delta = (minSize.width - frame.width) / screenRect.width
-                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
+                    workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta, axis: .horizontal, in: screenRect, gaps: gaps)
                     adjusted = true
                 }
             }
@@ -346,16 +346,32 @@ class TilingController: ObservableObject {
             result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
         }
 
+        // Collect windows to update
+        struct RetileEntry {
+            let windowInfo: WindowInfo
+            let frame: CGRect
+        }
+        let entries: [RetileEntry] = result.frames.compactMap { (windowID, frame) in
+            guard let windowInfo = windowTracker.trackedWindows[windowID] else { return nil }
+            return RetileEntry(windowInfo: windowInfo, frame: frame)
+        }
+
+        // Dispatch AX calls concurrently with animation disabled
         lastAppliedFrames.removeAll()
-        for (windowID, frame) in result.frames {
-            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
-            windowInfo.axElement.setFrame(frame)
-            lastAppliedFrames[windowID] = frame
+        DispatchQueue.concurrentPerform(iterations: entries.count) { index in
+            let entry = entries[index]
+            AXUIElement.disableAnimations(for: entry.windowInfo.ownerPID) {
+                entry.windowInfo.axElement.setFrame(entry.frame)
+            }
+        }
+        for entry in entries {
+            lastAppliedFrames[entry.windowInfo.windowID] = entry.frame
         }
     }
 
-    /// Lightweight retile for interactive drag operations — skips constraint checks
-    /// and only applies AX calls for frames that actually changed.
+    /// Lightweight retile for interactive drag operations — skips constraint checks,
+    /// only applies AX calls for frames that actually changed, disables animations,
+    /// and dispatches per-window AX calls concurrently.
     private func retileFast() {
         let ws = workspaceManager.activeWorkspace
         guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled(), !ws.windowIDs.isEmpty else { return }
@@ -364,10 +380,19 @@ class TilingController: ObservableObject {
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
             in: screenRect, gaps: currentGaps)
 
+        // Collect changed windows (frame diffing)
+        struct FrameUpdate {
+            let windowInfo: WindowInfo
+            let frame: CGRect
+            let positionChanged: Bool
+            let sizeChanged: Bool
+        }
+
+        var updates: [FrameUpdate] = []
         for (windowID, frame) in result.frames {
             let oldFrame = lastAppliedFrames[windowID]
 
-            // Skip entirely if frame hasn't changed
+            // Skip entirely if frame hasn't changed (1px threshold)
             if let old = oldFrame, abs(old.origin.x - frame.origin.x) < 1
                 && abs(old.origin.y - frame.origin.y) < 1
                 && abs(old.width - frame.width) < 1
@@ -377,19 +402,41 @@ class TilingController: ObservableObject {
 
             guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
 
-            // Only set position if it changed
-            if oldFrame == nil || abs(oldFrame!.origin.x - frame.origin.x) >= 1
-                || abs(oldFrame!.origin.y - frame.origin.y) >= 1 {
-                windowInfo.axElement.setPosition(frame.origin)
-            }
+            let posChanged = oldFrame == nil
+                || abs(oldFrame!.origin.x - frame.origin.x) >= 1
+                || abs(oldFrame!.origin.y - frame.origin.y) >= 1
+            let sizeChanged = oldFrame == nil
+                || abs(oldFrame!.width - frame.width) >= 1
+                || abs(oldFrame!.height - frame.height) >= 1
 
-            // Only set size if it changed
-            if oldFrame == nil || abs(oldFrame!.width - frame.width) >= 1
-                || abs(oldFrame!.height - frame.height) >= 1 {
-                windowInfo.axElement.setSize(frame.size)
-            }
+            updates.append(FrameUpdate(
+                windowInfo: windowInfo, frame: frame,
+                positionChanged: posChanged, sizeChanged: sizeChanged))
+        }
 
-            lastAppliedFrames[windowID] = frame
+        guard !updates.isEmpty else { return }
+
+        // Dispatch AX calls concurrently across windows — each window targets a different
+        // app process (IPC), so parallel execution reduces total latency from O(n) to O(1).
+        // disableAnimations per-app prevents macOS from animating the resize.
+        DispatchQueue.concurrentPerform(iterations: updates.count) { index in
+            let update = updates[index]
+            AXUIElement.disableAnimations(for: update.windowInfo.ownerPID) {
+                if update.sizeChanged {
+                    update.windowInfo.axElement.setSize(update.frame.size)
+                }
+                if update.positionChanged {
+                    update.windowInfo.axElement.setPosition(update.frame.origin)
+                }
+                if update.sizeChanged {
+                    update.windowInfo.axElement.setSize(update.frame.size)
+                }
+            }
+        }
+
+        // Update frame cache after all AX calls complete
+        for update in updates {
+            lastAppliedFrames[update.windowInfo.windowID] = update.frame
         }
     }
 
@@ -432,7 +479,8 @@ class TilingController: ObservableObject {
         guard let focused = windowTracker.focusedWindowID,
               workspaceManager.activeWorkspace.windowIDs.contains(focused) else { return }
 
-        workspaceManager.activeWorkspace.engine.resizeSplit(at: focused, delta: delta)
+        let screenRect = ScreenHelper.axScreenRect()
+        workspaceManager.activeWorkspace.engine.resizeSplit(at: focused, delta: delta, axis: nil, in: screenRect, gaps: currentGaps)
         retile()
     }
 
@@ -559,8 +607,9 @@ class TilingController: ObservableObject {
         return nil
     }
 
-    /// Find if the point is near a split boundary. Returns the window ID whose
-    /// split should be resized, and the axis of the boundary.
+    /// Find if the point is near a split boundary. Returns the window ID and axis.
+    /// Always returns the LEFT/TOP window — this ensures the window is in the split's
+    /// first child, so `ratio + delta` gives the correct resize direction.
     func splitBoundaryAt(point: CGPoint, tolerance: CGFloat = 10) -> (WindowID, SplitDirection)? {
         let screenRect = ScreenHelper.axScreenRect()
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
@@ -575,7 +624,9 @@ class TilingController: ObservableObject {
                     let minY = max(frameA.minY, frameB.minY)
                     let maxY = min(frameA.maxY, frameB.maxY)
                     if abs(point.x - boundaryX) < tolerance && point.y >= minY && point.y <= maxY {
-                        return (idA, .horizontal)
+                        // Return the LEFT window (first child of horizontal split)
+                        let leftID = frameA.minX < frameB.minX ? idA : idB
+                        return (leftID, .horizontal)
                     }
                 }
                 // Check horizontal boundary (frames stacked)
@@ -584,7 +635,9 @@ class TilingController: ObservableObject {
                     let minX = max(frameA.minX, frameB.minX)
                     let maxX = min(frameA.maxX, frameB.maxX)
                     if abs(point.y - boundaryY) < tolerance && point.x >= minX && point.x <= maxX {
-                        return (idA, .vertical)
+                        // Return the TOP window (first child of vertical split)
+                        let topID = frameA.minY < frameB.minY ? idA : idB
+                        return (topID, .vertical)
                     }
                 }
             }
@@ -621,7 +674,7 @@ class TilingController: ObservableObject {
         // Only apply if delta is significant
         guard abs(delta) > 0.005 else { return }
 
-        workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta)
+        workspaceManager.activeWorkspace.engine.resizeSplit(at: windowID, delta: delta, axis: axis, in: screenRect, gaps: currentGaps)
         resizeDragOrigin = point
         retileFast()  // Skip constraint checks during drag for smooth performance
     }
