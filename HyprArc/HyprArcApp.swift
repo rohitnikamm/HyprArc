@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import os
 
 /// Dedicated view for the menu bar label so @ObservedObject
 /// properly subscribes to TilingController changes.
@@ -44,6 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tilingController: tilingController
     )
     private var permissionTimer: DispatchSourceTimer?
+    private let logger = Logger(subsystem: "rohit.HyprArc", category: "AppDelegate")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configLoader.load()
@@ -62,6 +65,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowTracker.start()
         tilingController.start()
         hotkeyManager.start()
+        registerWakeNotifications()
+    }
+
+    private func registerWakeNotifications() {
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(self, selector: #selector(handleWake),
+                       name: NSWorkspace.didWakeNotification, object: nil)
+        nc.addObserver(self, selector: #selector(handleWake),
+                       name: NSWorkspace.screensDidWakeNotification, object: nil)
+
+        // Screen lock/unlock (power button press, screensaver) — NOT covered by
+        // didWakeNotification since the Mac doesn't actually sleep.
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(handleWake),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+    }
+
+    /// Recover from sleep/wake: restart CGEvent tap, re-enumerate windows, retile.
+    /// macOS suspends all run loops during sleep — the tap dies, AXObservers freeze,
+    /// and window state goes stale. Full stop/start is the only reliable recovery.
+    @objc private func handleWake(_ notification: Notification) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+            guard AccessibilityHelper.isTrusted() else { return }
+
+            // Clear any in-progress mouse operations
+            tilingController.endResize()
+
+            // Restart CGEvent tap (fresh background thread + MachPort)
+            hotkeyManager.stop()
+            hotkeyManager.start()
+
+            // Re-enumerate all windows (fresh AXObservers + window discovery)
+            windowTracker.stop()
+            windowTracker.start()
+
+            // Reconcile tracked windows with reality and retile
+            tilingController.syncAndRetile()
+
+            // Refresh menu bar workspace icons
+            tilingController.objectWillChange.send()
+
+            logger.debug("Recovered from sleep/wake")
+        }
     }
 
     private func startPermissionPolling() {

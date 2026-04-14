@@ -33,16 +33,11 @@ class WorkspaceManager: ObservableObject {
 
     // MARK: - Workspace Switching
 
+    /// Pure state update. AX frame writes (hide outgoing / unhide incoming) are
+    /// the caller's responsibility and MUST run inside `disableAnimations` to
+    /// avoid visible per-app animations — see `TilingController.switchToWorkspace`.
     func switchToWorkspace(_ id: Int) {
         guard id != activeWorkspaceID, (1...9).contains(id) else { return }
-
-        // Hide current workspace windows: move offscreen, keep size to preserve
-        // rendered content (avoids re-render flicker on switch back)
-        for windowID in activeWorkspace.allWindowIDs {
-            guard let info = windowTracker.trackedWindows[windowID] else { continue }
-            info.axElement.setPosition(Self.offscreenPoint)
-        }
-
         logger.debug("Switching from workspace \(self.activeWorkspaceID) to \(id)")
         activeWorkspaceID = id
     }
@@ -69,7 +64,9 @@ class WorkspaceManager: ObservableObject {
 
         // Hide the window (it's now on an inactive workspace)
         if let info = windowTracker.trackedWindows[windowID] {
-            info.axElement.setPosition(Self.offscreenPoint)
+            AXUIElement.disableAnimations(for: info.ownerPID) {
+                info.axElement.setPosition(Self.offscreenPoint)
+            }
         }
 
         logger.debug("Moved window \(windowID) to workspace \(targetID)")
@@ -106,15 +103,18 @@ class WorkspaceManager: ObservableObject {
     /// Called on quit so users don't lose windows.
     func restoreAllWindows() {
         let screenRect = ScreenHelper.axScreenRect()
+        let centerX = screenRect.midX - 400
+        let centerY = screenRect.midY - 300
+        let center = CGPoint(x: centerX, y: centerY)
 
-        for ws in workspaces where ws.id != activeWorkspaceID {
-            for windowID in ws.allWindowIDs {
-                guard let info = windowTracker.trackedWindows[windowID] else { continue }
-                // Move to center of screen so it's visible
-                let centerX = screenRect.midX - 400
-                let centerY = screenRect.midY - 300
-                info.axElement.setPosition(CGPoint(x: centerX, y: centerY))
-            }
+        let infos: [WindowInfo] = workspaces
+            .filter { $0.id != activeWorkspaceID }
+            .flatMap { $0.allWindowIDs }
+            .compactMap { windowTracker.trackedWindows[$0] }
+        let pids = Set(infos.map(\.ownerPID))
+
+        AXUIElement.disableAnimations(forPIDs: pids) {
+            for info in infos { info.axElement.setPosition(center) }
         }
         logger.debug("Restored all offscreen windows to visible positions")
     }

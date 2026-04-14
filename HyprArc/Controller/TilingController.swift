@@ -95,6 +95,11 @@ class TilingController: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Wire native resize: when AX reports a window moved/resized, back-calculate ratio
+        windowTracker.onWindowFrameChanged = { [weak self] wid in
+            self?.handleNativeResize(windowID: wid)
+        }
+
         // Initial sync after a short delay to let the tracker enumerate
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.syncAndRetile()
@@ -170,7 +175,9 @@ class TilingController: ObservableObject {
                 // Hide offscreen if target workspace is not active
                 if targetID != workspaceManager.activeWorkspaceID {
                     if let info = windowTracker.trackedWindows[windowID] {
-                        info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                        AXUIElement.disableAnimations(for: info.ownerPID) {
+                            info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                        }
                     }
                 }
 
@@ -224,10 +231,10 @@ class TilingController: ObservableObject {
     // MARK: - Sync & Retile
 
     /// Diff tracked windows against active workspace, insert/remove as needed, then retile.
-    private func syncAndRetile() {
+    func syncAndRetile() {
         // Suppress sync during active mouse resize/swap to prevent feedback loops
         // (setting frames triggers AXObserver which triggers syncAndRetile)
-        guard !isResizing && !isSwapping else { return }
+        guard !isResizing && !isSwapping && !isNativeResizing else { return }
         guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled() else { return }
 
         // Refresh window properties before filtering
@@ -279,7 +286,9 @@ class TilingController: ObservableObject {
                 }
                 // Hide offscreen since it's on an inactive workspace
                 if let info = windowTracker.trackedWindows[windowID] {
-                    info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                    AXUIElement.disableAnimations(for: info.ownerPID) {
+                        info.axElement.setPosition(WorkspaceManager.offscreenPoint)
+                    }
                 }
             } else {
                 // Insert into active workspace (existing behavior)
@@ -386,6 +395,7 @@ class TilingController: ObservableObject {
             let frame: CGRect
             let positionChanged: Bool
             let sizeChanged: Bool
+            let originMovedOut: Bool
         }
 
         var updates: [FrameUpdate] = []
@@ -409,34 +419,53 @@ class TilingController: ObservableObject {
                 || abs(oldFrame!.width - frame.width) >= 1
                 || abs(oldFrame!.height - frame.height) >= 1
 
+            // Pre-compute outside concurrent block (thread safety — lastAppliedFrames
+            // must not be read from concurrent threads).
+            let movedOut = oldFrame != nil
+                && (frame.origin.x > oldFrame!.origin.x + 1
+                 || frame.origin.y > oldFrame!.origin.y + 1)
+
             updates.append(FrameUpdate(
                 windowInfo: windowInfo, frame: frame,
-                positionChanged: posChanged, sizeChanged: sizeChanged))
+                positionChanged: posChanged, sizeChanged: sizeChanged,
+                originMovedOut: movedOut))
         }
 
         guard !updates.isEmpty else { return }
 
-        // Dispatch AX calls concurrently across windows — each window targets a different
-        // app process (IPC), so parallel execution reduces total latency from O(n) to O(1).
-        // disableAnimations per-app prevents macOS from animating the resize.
-        DispatchQueue.concurrentPerform(iterations: updates.count) { index in
-            let update = updates[index]
-            AXUIElement.disableAnimations(for: update.windowInfo.ownerPID) {
-                if update.sizeChanged {
-                    update.windowInfo.axElement.setSize(update.frame.size)
-                }
-                if update.positionChanged {
-                    update.windowInfo.axElement.setPosition(update.frame.origin)
-                }
-                if update.sizeChanged {
-                    update.windowInfo.axElement.setSize(update.frame.size)
-                }
-            }
-        }
-
-        // Update frame cache after all AX calls complete
+        // Update frame cache BEFORE async dispatch (optimistic — next mouse event
+        // uses intended frames for diffing, not stale AX-applied frames).
         for update in updates {
             lastAppliedFrames[update.windowInfo.windowID] = update.frame
+        }
+
+        // Fire-and-forget per-window AX dispatch with job cancellation (AeroSpace pattern).
+        // Main thread returns immediately — never waits for AX IPC.
+        // If a new frame arrives before the old job finishes, the old job is cancelled.
+        for update in updates {
+            pendingFrameJobs[update.windowInfo.windowID]?.cancel()
+
+            let axElement = update.windowInfo.axElement
+            let frame = update.frame
+            let originMovedOut = update.originMovedOut
+            let sizeChanged = update.sizeChanged
+            let positionChanged = update.positionChanged
+
+            var job: DispatchWorkItem!
+            job = DispatchWorkItem {
+                guard !job.isCancelled else { return }
+                if originMovedOut {
+                    axElement.setPosition(frame.origin)
+                    guard !job.isCancelled else { return }
+                    axElement.setSize(frame.size)
+                } else {
+                    if sizeChanged { axElement.setSize(frame.size) }
+                    guard !job.isCancelled else { return }
+                    if positionChanged { axElement.setPosition(frame.origin) }
+                }
+            }
+            pendingFrameJobs[update.windowInfo.windowID] = job
+            DispatchQueue.global(qos: .userInteractive).async(execute: job)
         }
     }
 
@@ -509,34 +538,47 @@ class TilingController: ObservableObject {
 
     func switchToWorkspace(_ id: Int) {
         guard AXIsProcessTrusted() else { return }
-        workspaceManager.switchToWorkspace(id)
-        activeWorkspaceID = workspaceManager.activeWorkspaceID
+        guard id != workspaceManager.activeWorkspaceID, (1...9).contains(id) else { return }
 
-        let ws = workspaceManager.activeWorkspace
-        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+        let outgoingIDs = workspaceManager.activeWorkspace.allWindowIDs
+        let incomingWS = workspaceManager.workspaces[id - 1]
+        let incomingIDs = incomingWS.allWindowIDs
 
+        // Frames for incoming tiled windows
         let screenRect = ScreenHelper.axScreenRect()
-        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
-            in: screenRect, gaps: currentGaps)
+        let result = isEnabled
+            ? incomingWS.engine.calculateFrames(in: screenRect, gaps: currentGaps)
+            : LayoutResult(frames: [:])
 
-        // Pass 1: Resize only windows that need it (while still offscreen).
-        // Windows that kept their size have content already rendered — no re-render needed.
-        for (windowID, frame) in result.frames {
-            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
-            let currentSize = windowInfo.axElement.size
-            if currentSize == nil
-                || abs(currentSize!.width - frame.size.width) > 1
-                || abs(currentSize!.height - frame.size.height) > 1 {
-                windowInfo.axElement.setSize(frame.size)
+        // Collect every pid we're about to touch — disable animations once per app.
+        let touchedIDs = outgoingIDs.union(incomingIDs)
+        let pids = Set(touchedIDs.compactMap { windowTracker.trackedWindows[$0]?.ownerPID })
+
+        AXUIElement.disableAnimations(forPIDs: pids) {
+            // Pass A: unhide + retile incoming (AeroSpace refresh.swift:179-183).
+            lastAppliedFrames.removeAll()
+            for (windowID, frame) in result.frames {
+                guard let info = windowTracker.trackedWindows[windowID] else { continue }
+                let currentSize = info.axElement.size
+                if currentSize == nil
+                    || abs(currentSize!.width - frame.size.width) > 1
+                    || abs(currentSize!.height - frame.size.height) > 1 {
+                    info.axElement.setSize(frame.size)
+                }
+                info.axElement.setPosition(frame.origin)
+                lastAppliedFrames[windowID] = frame
             }
-        }
 
-        // Pass 2: Move all to correct positions (instant appear with content intact)
-        lastAppliedFrames.removeAll()
-        for (windowID, frame) in result.frames {
-            guard let windowInfo = windowTracker.trackedWindows[windowID] else { continue }
-            windowInfo.axElement.setPosition(frame.origin)
-            lastAppliedFrames[windowID] = frame
+            // Pass B: hide outgoing (AeroSpace refresh.swift:184-189). Skip any
+            // window that also belongs to incoming (shouldn't happen, but be safe).
+            for wid in outgoingIDs where !incomingIDs.contains(wid) {
+                windowTracker.trackedWindows[wid]?.axElement.setPosition(WorkspaceManager.offscreenPoint)
+            }
+
+            // State update inside the block so any observers that react by
+            // reading AX frames also benefit from the animation guard.
+            workspaceManager.switchToWorkspace(id)
+            activeWorkspaceID = workspaceManager.activeWorkspaceID
         }
     }
 
@@ -573,6 +615,13 @@ class TilingController: ObservableObject {
     private var resizingWindowID: WindowID?
     private var resizeAxis: SplitDirection?
     private var resizeDragOrigin: CGPoint?
+    private var pendingFrameJobs: [WindowID: DispatchWorkItem] = [:]
+    private var nativeResizingWindowID: WindowID?
+    private var nativeResizeBaselineFrame: CGRect?           // Frozen frame at drag start
+    private var nativeResizeLastCumulativeDelta: CGFloat = 0  // Last cumulative delta applied
+    private var nativeResizeLastAxis: SplitDirection?         // Axis of last delta
+    private var nativeResizeDragOrigin: CGPoint?              // Mouse position at drag start
+    private var animationDisabledPIDs: Set<pid_t> = []
 
     private var swapSourceWindowID: WindowID?
 
@@ -679,17 +728,259 @@ class TilingController: ObservableObject {
         retileFast()  // Skip constraint checks during drag for smooth performance
     }
 
-    /// End resize operation. Runs full retile with constraint checks.
+    /// End resize operation. Cancels pending AX jobs and runs full retile with constraint checks.
     func endResize() {
         let wasResizing = resizingWindowID != nil
         resizingWindowID = nil
         resizeAxis = nil
         resizeDragOrigin = nil
+
+        // Cancel all pending async AX jobs from the drag session
+        for (_, job) in pendingFrameJobs { job.cancel() }
+        pendingFrameJobs.removeAll()
+
         if wasResizing {
             retile()  // Full retile with constraint checks on release
             logger.debug("End resize")
         }
     }
+
+    // MARK: - Native Resize (AeroSpace-style: macOS handles drag, we adjust siblings)
+
+    var isNativeResizing: Bool { nativeResizingWindowID != nil }
+
+    /// Begin native resize: let macOS handle the window drag at 120fps.
+    /// We disable animations and track which window is being dragged.
+    func beginNativeResize(at point: CGPoint) {
+        guard NSApp.keyWindow == nil else { return }
+        guard let windowID = windowAt(point: point) else { return }
+        nativeResizingWindowID = windowID
+
+        // Snapshot the window's frame at drag start (frozen baseline for cumulative deltas)
+        nativeResizeBaselineFrame = lastAppliedFrames[windowID]
+            ?? windowTracker.trackedWindows[windowID]?.frame
+        nativeResizeLastCumulativeDelta = 0
+        nativeResizeLastAxis = nil
+        nativeResizeDragOrigin = point
+
+        // Disable animations for all tiled apps for the duration of the drag
+        let pids = Set(windowTracker.trackedWindows.values.map { $0.ownerPID })
+        for pid in pids {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+        }
+        animationDisabledPIDs = pids
+        logger.debug("Begin native resize for window \(windowID)")
+    }
+
+    /// End native resize: restore animations and full retile for perfect alignment.
+    func endNativeResize() {
+        let wasResizing = nativeResizingWindowID != nil
+        let resizingID = nativeResizingWindowID
+
+        // Final ratio adjustment: capture any remaining delta that slipped through thresholds
+        if wasResizing, let windowID = resizingID,
+           let baselineFrame = nativeResizeBaselineFrame,
+           let windowInfo = windowTracker.trackedWindows[windowID] {
+            let finalFrame = windowInfo.axElement.frame ?? windowInfo.frame
+            let screenRect = ScreenHelper.axScreenRect()
+            let gaps = currentGaps
+
+            let totalWidthDelta = (finalFrame.width - baselineFrame.width) / screenRect.width
+            let totalHeightDelta = (finalFrame.height - baselineFrame.height) / screenRect.height
+            let finalDelta: CGFloat
+            let finalAxis: SplitDirection
+
+            if abs(totalWidthDelta) > abs(totalHeightDelta) {
+                finalDelta = totalWidthDelta
+                finalAxis = .horizontal
+            } else {
+                finalDelta = totalHeightDelta
+                finalAxis = .vertical
+            }
+
+            // Apply remaining delta (total - already applied)
+            let remainingDelta = finalDelta - nativeResizeLastCumulativeDelta
+            if abs(remainingDelta) > 0.0005 {
+                workspaceManager.activeWorkspace.engine.resizeSplit(
+                    at: windowID, delta: remainingDelta, axis: finalAxis,
+                    in: screenRect, gaps: gaps)
+            }
+        }
+
+        nativeResizingWindowID = nil
+        nativeResizeBaselineFrame = nil
+        nativeResizeLastCumulativeDelta = 0
+        nativeResizeLastAxis = nil
+        nativeResizeDragOrigin = nil
+
+        // Cancel pending async jobs
+        for (_, job) in pendingFrameJobs { job.cancel() }
+        pendingFrameJobs.removeAll()
+
+        // Restore animations
+        for pid in animationDisabledPIDs {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+        animationDisabledPIDs.removeAll()
+
+        if wasResizing {
+            retile()
+            logger.debug("End native resize")
+        }
+    }
+
+    /// Called from WindowTracker when a window's frame changes via AX notification.
+    /// During native resize, back-calculates the ratio delta and relayouts siblings.
+    func handleNativeResize(windowID: WindowID) {
+        guard nativeResizingWindowID == windowID else { return }
+        guard !isResizing && !isSwapping else { return }
+        guard let windowInfo = windowTracker.trackedWindows[windowID] else { return }
+        let newFrame = windowInfo.frame
+        guard let baselineFrame = nativeResizeBaselineFrame else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let gaps = currentGaps
+
+        // Compute CUMULATIVE delta from frozen baseline (not incremental from last engine frame)
+        let cumulativeWidthDelta = (newFrame.width - baselineFrame.width) / screenRect.width
+        let cumulativeHeightDelta = (newFrame.height - baselineFrame.height) / screenRect.height
+
+        // Determine dominant axis
+        let cumulativeDelta: CGFloat
+        let axis: SplitDirection
+        if abs(cumulativeWidthDelta) > abs(cumulativeHeightDelta) {
+            cumulativeDelta = cumulativeWidthDelta
+            axis = .horizontal
+        } else {
+            cumulativeDelta = cumulativeHeightDelta
+            axis = .vertical
+        }
+
+        guard abs(cumulativeDelta) > 0.002 else { return }
+
+        // Convert cumulative to incremental: undo previous, apply new
+        if let lastAxis = nativeResizeLastAxis, lastAxis != axis {
+            // Axis changed mid-drag: undo old axis, apply new from scratch
+            workspaceManager.activeWorkspace.engine.resizeSplit(
+                at: windowID, delta: -nativeResizeLastCumulativeDelta, axis: lastAxis,
+                in: screenRect, gaps: gaps)
+            workspaceManager.activeWorkspace.engine.resizeSplit(
+                at: windowID, delta: cumulativeDelta, axis: axis,
+                in: screenRect, gaps: gaps)
+        } else {
+            let incrementalDelta = cumulativeDelta - nativeResizeLastCumulativeDelta
+            guard abs(incrementalDelta) > 0.001 else { return }
+            workspaceManager.activeWorkspace.engine.resizeSplit(
+                at: windowID, delta: incrementalDelta, axis: axis,
+                in: screenRect, gaps: gaps)
+        }
+
+        nativeResizeLastCumulativeDelta = cumulativeDelta
+        nativeResizeLastAxis = axis
+
+        retileSiblings(excluding: windowID)
+    }
+
+    /// Manual drag resize: compute cumulative delta from mouse position (not AX frame).
+    /// Works in the gap between windows where macOS native resize doesn't trigger.
+    func updateNativeResize(to point: CGPoint) {
+        guard let windowID = nativeResizingWindowID else { return }
+        guard let dragOrigin = nativeResizeDragOrigin else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let gaps = currentGaps
+
+        // Delta from mouse movement (not window frame which may lag)
+        let dx = (point.x - dragOrigin.x) / screenRect.width
+        let dy = (point.y - dragOrigin.y) / screenRect.height
+
+        let cumulativeDelta: CGFloat
+        let axis: SplitDirection
+        if let lockedAxis = nativeResizeLastAxis {
+            // Once axis is determined, lock it for the drag session
+            axis = lockedAxis
+            cumulativeDelta = (axis == .horizontal) ? dx : dy
+        } else if abs(dx) > abs(dy) && abs(dx) > 0.002 {
+            axis = .horizontal
+            cumulativeDelta = dx
+        } else if abs(dy) > 0.002 {
+            axis = .vertical
+            cumulativeDelta = dy
+        } else {
+            return
+        }
+
+        let incrementalDelta = cumulativeDelta - nativeResizeLastCumulativeDelta
+        guard abs(incrementalDelta) > 0.001 else { return }
+
+        workspaceManager.activeWorkspace.engine.resizeSplit(
+            at: windowID, delta: incrementalDelta, axis: axis,
+            in: screenRect, gaps: gaps)
+
+        nativeResizeLastCumulativeDelta = cumulativeDelta
+        nativeResizeLastAxis = axis
+
+        retileSiblings(excluding: windowID)
+        retileDraggedWindow(windowID)
+    }
+
+    /// Apply the engine's calculated frame to the dragged window.
+    /// Called during manual drag (not during native resize where macOS handles it).
+    private func retileDraggedWindow(_ windowID: WindowID) {
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = workspaceManager.activeWorkspace.engine.calculateFrames(
+            in: screenRect, gaps: currentGaps)
+        guard let frame = result.frames[windowID],
+              let axElement = windowTracker.trackedWindows[windowID]?.axElement else { return }
+
+        axElement.setPosition(frame.origin)
+        axElement.setSize(frame.size)
+    }
+
+    /// Retile all windows EXCEPT the one being natively dragged.
+    /// Uses async fire-and-forget dispatch with job cancellation.
+    private func retileSiblings(excluding skipID: WindowID) {
+        let ws = workspaceManager.activeWorkspace
+        guard isEnabled, !ws.windowIDs.isEmpty else { return }
+
+        let screenRect = ScreenHelper.axScreenRect()
+        let result = ws.engine.calculateFrames(in: screenRect, gaps: currentGaps)
+
+        for (windowID, frame) in result.frames {
+            if windowID == skipID {
+                // Don't cache the engine's frame for the dragged window —
+                // the baseline frame is the correct reference during drag
+                continue
+            }
+
+            let oldFrame = lastAppliedFrames[windowID]
+            guard oldFrame == nil
+                || abs(oldFrame!.origin.x - frame.origin.x) >= 1
+                || abs(oldFrame!.origin.y - frame.origin.y) >= 1
+                || abs(oldFrame!.width - frame.width) >= 1
+                || abs(oldFrame!.height - frame.height) >= 1
+            else { continue }
+
+            lastAppliedFrames[windowID] = frame
+
+            guard let axElement = windowTracker.trackedWindows[windowID]?.axElement else { continue }
+
+            pendingFrameJobs[windowID]?.cancel()
+            var job: DispatchWorkItem!
+            job = DispatchWorkItem {
+                guard !job.isCancelled else { return }
+                axElement.setPosition(frame.origin)
+                guard !job.isCancelled else { return }
+                axElement.setSize(frame.size)
+            }
+            pendingFrameJobs[windowID] = job
+            DispatchQueue.global(qos: .userInteractive).async(execute: job)
+        }
+    }
+
+    // MARK: - Mouse Swap
 
     /// Begin a mouse swap operation (triggered by clicking on a window's title bar).
     func beginSwap(at point: CGPoint) {

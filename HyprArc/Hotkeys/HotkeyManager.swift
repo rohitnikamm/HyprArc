@@ -38,6 +38,11 @@ class HotkeyManager {
             context?.registeredBindings = Array(bindings)
         }
 
+        // Seed current bindings into the new context (onBindingsChanged only fires
+        // on config change — after wake/restart, config hasn't changed so the
+        // callback never fires and registeredBindings would stay empty).
+        context.registeredBindings = Array(dispatcher.currentBindings)
+
         let contextPtr = Unmanaged.passRetained(context).toOpaque()
 
         let eventMask: CGEventMask =
@@ -252,10 +257,9 @@ nonisolated private func hotkeyCallback(
         let location = event.location
 
         DispatchQueue.main.async {
-            // Check split boundary FIRST — the boundary between stacked windows
-            // overlaps the bottom window's title bar region, so boundary must take priority.
+            // Check split boundary FIRST — consume event for manual drag tracking
             if context.tilingController.splitBoundaryAt(point: location) != nil {
-                context.tilingController.beginResize(at: location)
+                context.tilingController.beginNativeResize(at: location)
             } else if context.tilingController.windowAtTitleBar(point: location) != nil {
                 context.tilingController.beginSwap(at: location)
             }
@@ -275,8 +279,8 @@ nonisolated private func hotkeyCallback(
         let location = event.location
 
         DispatchQueue.main.async {
-            if context.tilingController.isResizing {
-                context.tilingController.updateResize(to: location)
+            if context.tilingController.isNativeResizing {
+                context.tilingController.updateNativeResize(to: location)
             } else if context.tilingController.isSwapping {
                 context.tilingController.updateSwapOverlay(at: location)
             }
@@ -289,8 +293,8 @@ nonisolated private func hotkeyCallback(
         let location = event.location
 
         DispatchQueue.main.async {
-            if context.tilingController.isResizing {
-                context.tilingController.endResize()
+            if context.tilingController.isNativeResizing {
+                context.tilingController.endNativeResize()
             }
             if context.tilingController.isSwapping {
                 context.tilingController.endSwap(at: location)

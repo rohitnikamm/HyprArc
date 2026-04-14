@@ -18,6 +18,10 @@ class WindowTracker: ObservableObject {
 
     private var isStarted = false
 
+    /// Called when a tracked window's frame changes (resize/move notification from AX).
+    /// TilingController uses this to trigger native resize back-calculation.
+    var onWindowFrameChanged: ((WindowID) -> Void)?
+
     // MARK: - Lifecycle
 
     func start() {
@@ -296,6 +300,7 @@ class WindowTracker: ObservableObject {
         case kAXWindowMovedNotification, kAXWindowResizedNotification:
             if let wid = element.windowID {
                 trackedWindows[wid]?.refresh()
+                onWindowFrameChanged?(wid)
             }
 
         case kAXWindowMiniaturizedNotification:

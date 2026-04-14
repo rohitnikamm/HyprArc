@@ -137,6 +137,29 @@ extension AXUIElement {
         }
     }
 
+    /// Batch variant: toggle AXEnhancedUserInterface off on every pid once,
+    /// run body, then restore. Used by workspace switch which writes frames
+    /// across many apps in a single burst.
+    static func disableAnimations(forPIDs pids: Set<pid_t>, _ body: () -> Void) {
+        guard AXIsProcessTrusted() else { body(); return }
+        var wasEnabled: [pid_t: Bool] = [:]
+        for pid in pids {
+            let app = AXUIElementCreateApplication(pid)
+            var value: AnyObject?
+            let enabled = AXUIElementCopyAttributeValue(app, "AXEnhancedUserInterface" as CFString, &value) == .success
+                && ((value as? Bool) ?? false)
+            wasEnabled[pid] = enabled
+            if enabled {
+                AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+            }
+        }
+        body()
+        for (pid, enabled) in wasEnabled where enabled {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+    }
+
     // MARK: - Window List
 
     var windows: [AXUIElement] {

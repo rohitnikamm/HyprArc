@@ -24,6 +24,9 @@ class CommandDispatcher {
     /// Called when bindings change — HotkeyManager subscribes to update the event tap context.
     var onBindingsChanged: ((_ bindings: Set<KeyBinding>) -> Void)?
 
+    /// Current set of registered key bindings (for seeding new HotkeyContext after restart).
+    var currentBindings: Set<KeyBinding> { Set(bindings.keys) }
+
     init(tilingController: TilingController, configLoader: ConfigLoader) {
         self.tilingController = tilingController
         self.configLoader = configLoader
