@@ -17,16 +17,16 @@ First launch prompts for the Accessibility permission required to manage windows
 
 ## Features
 
-- 9 virtual workspaces with instant switching (no macOS Space flicker)
+- 9 virtual workspaces with instant switching
 - Three layout algorithms, toggled via menu bar or keybinding:
   - Dwindle — recursive binary split by aspect ratio
   - Master-Stack — dominant area + stack, configurable ratio + orientation
-  - Accordion — stacked with configurable peek padding, MRU-aware
+  - Accordion — stacked with configurable peek padding
 - Geometric focus navigation (`Opt+H/J/K/L`) that works identically across layouts
 - Window swap, float toggle, and per-app rules (float / assign to workspace)
 - Mouse resize on split boundaries; mouse swap via title-bar drag
 - TOML config at `~/.config/hyprarc/config.toml` with hot-reload
-- Raycast-style Settings UI with Liquid Glass material and press-to-record keybindings
+- Settings UI with Liquid Glass material and press-to-record keybindings
 
 <img width="714" height="463" alt="HyprArc settings" src="https://github.com/user-attachments/assets/e6659366-7b3d-4d2b-b308-7b1446000c89" />
 <img width="662" height="465" alt="HyprArc keybindings" src="https://github.com/user-attachments/assets/707f077f-8708-47ce-ad28-ac86a98050f1" />
