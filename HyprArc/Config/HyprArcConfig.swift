@@ -7,6 +7,7 @@ struct HyprArcConfig: Equatable {
     var gaps = GapsConfig()
     var dwindle = DwindleConfig()
     var masterStack = MasterStackConfig()
+    var accordion = AccordionConfig()
     var keybindings = KeybindingsConfig()
     var windowRules: [WindowRule] = []
 
@@ -26,6 +27,11 @@ struct HyprArcConfig: Equatable {
     struct MasterStackConfig: Equatable {
         var masterRatio: CGFloat = 0.55
         var orientation: String = "left"
+    }
+
+    struct AccordionConfig: Equatable {
+        var padding: CGFloat = 30
+        var orientation: String = "horizontal"  // or "vertical"
     }
 
     struct KeybindingsConfig: Equatable {
@@ -61,6 +67,10 @@ struct HyprArcConfig: Equatable {
             "move-to-workspace-9": "opt+shift+9",
             "toggle-float": "opt+space",
             "cycle-layout": "opt+d",
+            "layout-dwindle": "opt+t",
+            "layout-master-stack": "opt+m",
+            "layout-accordion": "opt+a",
+            "accordion-toggle-orientation": "opt+shift+a",
             "resize-grow": "opt+equal",
             "resize-shrink": "opt+minus",
             "quit": "opt+shift+e",
@@ -93,7 +103,7 @@ struct HyprArcConfig: Equatable {
         # Edit this file and save — changes apply automatically.
 
         [general]
-        # Layout algorithm: "dwindle" or "master-stack"
+        # Layout algorithm: "dwindle", "master-stack", or "accordion"
         default-layout = "dwindle"
 
         [gaps]
@@ -111,6 +121,12 @@ struct HyprArcConfig: Equatable {
         master-ratio = 0.55
         # Master area position: "left", "right", "top", "bottom"
         orientation = "left"
+
+        [accordion]
+        # Peek strip size between stacked windows (pixels)
+        padding = 30
+        # "horizontal" (peek left/right) or "vertical" (peek top/bottom)
+        orientation = "horizontal"
 
         [keybindings]
         # Format: command = "modifier+key"
@@ -143,6 +159,10 @@ struct HyprArcConfig: Equatable {
         move-to-workspace-9 = "opt+shift+9"
         toggle-float = "opt+space"
         cycle-layout = "opt+d"
+        layout-dwindle = "opt+t"
+        layout-master-stack = "opt+m"
+        layout-accordion = "opt+a"
+        accordion-toggle-orientation = "opt+shift+a"
         resize-grow = "opt+equal"
         resize-shrink = "opt+minus"
         quit = "opt+shift+e"

@@ -12,7 +12,7 @@ enum TOMLSerializer {
         lines.append("")
 
         lines.append("[general]")
-        lines.append("# Layout algorithm: \"dwindle\" or \"master-stack\"")
+        lines.append("# Layout algorithm: \"dwindle\", \"master-stack\", or \"accordion\"")
         lines.append("default-layout = \"\(config.general.defaultLayout)\"")
         lines.append("")
 
@@ -33,6 +33,13 @@ enum TOMLSerializer {
         lines.append("master-ratio = \(formatNumber(config.masterStack.masterRatio))")
         lines.append("# Master area position: \"left\", \"right\", \"top\", \"bottom\"")
         lines.append("orientation = \"\(config.masterStack.orientation)\"")
+        lines.append("")
+
+        lines.append("[accordion]")
+        lines.append("# Peek strip size between stacked windows (pixels)")
+        lines.append("padding = \(formatNumber(config.accordion.padding))")
+        lines.append("# \"horizontal\" (peek left/right) or \"vertical\" (peek top/bottom)")
+        lines.append("orientation = \"\(config.accordion.orientation)\"")
 
         lines.append("")
         lines.append("[keybindings]")

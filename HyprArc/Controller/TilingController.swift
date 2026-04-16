@@ -43,22 +43,34 @@ class TilingController: ObservableObject {
             windowTracker: windowTracker,
             defaultEngine: Self.makeEngine(from: configLoader.config)
         )
-        self.layoutName = configLoader.config.general.defaultLayout == "master-stack"
-            ? "Master-Stack" : "Dwindle"
+        self.layoutName = Self.displayName(for: Self.makeEngine(from: configLoader.config))
     }
 
     /// Build a layout engine from the current config.
     private static func makeEngine(from config: HyprArcConfig) -> any TilingEngine {
-        if config.general.defaultLayout == "master-stack" {
+        switch config.general.defaultLayout {
+        case "master-stack":
             var engine = MasterStackLayout()
             engine.masterRatio = config.masterStack.masterRatio
             engine.orientation = MasterOrientation(string: config.masterStack.orientation)
             return engine
-        } else {
+        case "accordion":
+            var engine = AccordionLayout()
+            engine.padding = config.accordion.padding
+            engine.orientation = AccordionOrientation(string: config.accordion.orientation)
+            return engine
+        default:
             var engine = DwindleLayout()
             engine.defaultSplitRatio = config.dwindle.defaultSplitRatio
             return engine
         }
+    }
+
+    /// Friendly display name for a given engine instance.
+    private static func displayName(for engine: any TilingEngine) -> String {
+        if engine is MasterStackLayout { return "Master-Stack" }
+        if engine is AccordionLayout { return "Accordion" }
+        return "Dwindle"
     }
 
     // MARK: - Lifecycle
@@ -116,11 +128,16 @@ class TilingController: ObservableObject {
     /// Apply layout and engine settings from config to all workspaces.
     private func applyConfigChanges(_ config: HyprArcConfig) {
         guard AXIsProcessTrusted() else { return }
-        let wantsMasterStack = config.general.defaultLayout == "master-stack"
-        let currentIsMasterStack = workspaceManager.activeWorkspace.engine is MasterStackLayout
+        let wantedKind = config.general.defaultLayout
+        let currentKind: String = {
+            let engine = workspaceManager.activeWorkspace.engine
+            if engine is MasterStackLayout { return "master-stack" }
+            if engine is AccordionLayout { return "accordion" }
+            return "dwindle"
+        }()
 
         // Switch layout if the configured default changed
-        if wantsMasterStack != currentIsMasterStack {
+        if wantedKind != currentKind {
             for i in workspaceManager.workspaces.indices {
                 let currentWindows = workspaceManager.workspaces[i].engine.windowIDs
                 workspaceManager.workspaces[i].engine = Self.makeEngine(from: config)
@@ -128,7 +145,7 @@ class TilingController: ObservableObject {
                     workspaceManager.workspaces[i].engine.insertWindow(id, afterFocused: nil)
                 }
             }
-            layoutName = wantsMasterStack ? "Master-Stack" : "Dwindle"
+            layoutName = Self.displayName(for: workspaceManager.activeWorkspace.engine)
         }
 
         // Update engine-specific settings on all workspaces
@@ -140,6 +157,10 @@ class TilingController: ObservableObject {
                 master.masterRatio = config.masterStack.masterRatio
                 master.orientation = MasterOrientation(string: config.masterStack.orientation)
                 workspaceManager.workspaces[i].engine = master
+            } else if var accordion = workspaceManager.workspaces[i].engine as? AccordionLayout {
+                accordion.padding = config.accordion.padding
+                accordion.orientation = AccordionOrientation(string: config.accordion.orientation)
+                workspaceManager.workspaces[i].engine = accordion
             }
         }
 
@@ -326,6 +347,8 @@ class TilingController: ObservableObject {
         let screenRect = ScreenHelper.axScreenRect()
         let gaps = currentGaps
 
+        workspaceManager.activeWorkspace.engine.setFocused(windowTracker.focusedWindowID)
+
         // First pass: calculate frames and check for constraint violations
         var result = workspaceManager.activeWorkspace.engine.calculateFrames(in: screenRect, gaps: gaps)
         var adjusted = false
@@ -386,6 +409,7 @@ class TilingController: ObservableObject {
         guard isEnabled, AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled(), !ws.windowIDs.isEmpty else { return }
 
         let screenRect = ScreenHelper.axScreenRect()
+        workspaceManager.activeWorkspace.engine.setFocused(windowTracker.focusedWindowID)
         let result = workspaceManager.activeWorkspace.engine.calculateFrames(
             in: screenRect, gaps: currentGaps)
 
@@ -591,23 +615,78 @@ class TilingController: ObservableObject {
 
     // MARK: - Layout Switching
 
+    /// Cycle active-workspace layout: Dwindle → Master-Stack → Accordion → Dwindle.
     func cycleLayout() {
-        let currentWindows = workspaceManager.activeWorkspace.engine.windowIDs
-
-        if workspaceManager.activeWorkspace.engine is DwindleLayout {
-            workspaceManager.activeWorkspace.engine = MasterStackLayout()
-            layoutName = "Master-Stack"
+        let engine = workspaceManager.activeWorkspace.engine
+        let next: any TilingEngine
+        if engine is DwindleLayout {
+            var e = MasterStackLayout()
+            e.masterRatio = configLoader.config.masterStack.masterRatio
+            e.orientation = MasterOrientation(string: configLoader.config.masterStack.orientation)
+            next = e
+        } else if engine is MasterStackLayout {
+            var e = AccordionLayout()
+            e.padding = configLoader.config.accordion.padding
+            e.orientation = AccordionOrientation(string: configLoader.config.accordion.orientation)
+            next = e
         } else {
-            workspaceManager.activeWorkspace.engine = DwindleLayout()
-            layoutName = "Dwindle"
+            var e = DwindleLayout()
+            e.defaultSplitRatio = configLoader.config.dwindle.defaultSplitRatio
+            next = e
         }
-
-        for id in currentWindows {
-            workspaceManager.activeWorkspace.engine.insertWindow(id, afterFocused: nil)
-        }
-
-        retile()
+        replaceActiveEngine(with: next)
         logger.debug("Switched layout to \(self.layoutName)")
+    }
+
+    /// Direct-jump to Dwindle for the active workspace.
+    func setLayoutDwindle() {
+        if workspaceManager.activeWorkspace.engine is DwindleLayout { return }
+        var e = DwindleLayout()
+        e.defaultSplitRatio = configLoader.config.dwindle.defaultSplitRatio
+        replaceActiveEngine(with: e)
+        logger.debug("Set layout to Dwindle")
+    }
+
+    /// Direct-jump to Master-Stack for the active workspace.
+    func setLayoutMasterStack() {
+        if workspaceManager.activeWorkspace.engine is MasterStackLayout { return }
+        var e = MasterStackLayout()
+        e.masterRatio = configLoader.config.masterStack.masterRatio
+        e.orientation = MasterOrientation(string: configLoader.config.masterStack.orientation)
+        replaceActiveEngine(with: e)
+        logger.debug("Set layout to Master-Stack")
+    }
+
+    /// Direct-jump to Accordion for the active workspace.
+    func setLayoutAccordion() {
+        if workspaceManager.activeWorkspace.engine is AccordionLayout { return }
+        var e = AccordionLayout()
+        e.padding = configLoader.config.accordion.padding
+        e.orientation = AccordionOrientation(string: configLoader.config.accordion.orientation)
+        replaceActiveEngine(with: e)
+        logger.debug("Set layout to Accordion")
+    }
+
+    /// Flip accordion orientation horizontal ↔ vertical for the active workspace.
+    /// No-op if the active engine isn't accordion.
+    func toggleAccordionOrientation() {
+        guard var accordion = workspaceManager.activeWorkspace.engine as? AccordionLayout else { return }
+        accordion.orientation = accordion.orientation == .horizontal ? .vertical : .horizontal
+        workspaceManager.activeWorkspace.engine = accordion
+        retile()
+        logger.debug("Toggled accordion orientation to \(accordion.orientation.stringValue)")
+    }
+
+    /// Swap the active workspace's engine, preserving windows.
+    private func replaceActiveEngine(with newEngine: any TilingEngine) {
+        let currentWindows = workspaceManager.activeWorkspace.engine.windowIDs
+        var engine = newEngine
+        for id in currentWindows {
+            engine.insertWindow(id, afterFocused: nil)
+        }
+        workspaceManager.activeWorkspace.engine = engine
+        layoutName = Self.displayName(for: engine)
+        retile()
     }
 
     // MARK: - Mouse Resize & Swap

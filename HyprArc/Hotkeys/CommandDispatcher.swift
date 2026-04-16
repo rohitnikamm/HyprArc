@@ -9,6 +9,10 @@ enum TilingCommand: Sendable {
     case moveToWorkspace(Int)
     case toggleFloat
     case cycleLayout
+    case setLayoutDwindle
+    case setLayoutMasterStack
+    case setLayoutAccordion
+    case toggleAccordionOrientation
     case resizeSplit(CGFloat)
     case quitHyprArc
 }
@@ -72,6 +76,10 @@ class CommandDispatcher {
         case "swap-right": return .swapDirection(.right)
         case "toggle-float": return .toggleFloat
         case "cycle-layout": return .cycleLayout
+        case "layout-dwindle": return .setLayoutDwindle
+        case "layout-master-stack": return .setLayoutMasterStack
+        case "layout-accordion": return .setLayoutAccordion
+        case "accordion-toggle-orientation": return .toggleAccordionOrientation
         case "resize-grow": return .resizeSplit(0.05)
         case "resize-shrink": return .resizeSplit(-0.05)
         case "quit": return .quitHyprArc
@@ -100,6 +108,8 @@ class CommandDispatcher {
         "move-to-workspace-4", "move-to-workspace-5", "move-to-workspace-6",
         "move-to-workspace-7", "move-to-workspace-8", "move-to-workspace-9",
         "toggle-float", "cycle-layout",
+        "layout-dwindle", "layout-master-stack",
+        "layout-accordion", "accordion-toggle-orientation",
         "resize-grow", "resize-shrink",
         "quit",
     ]
@@ -131,6 +141,14 @@ class CommandDispatcher {
             tilingController.toggleFloat()
         case .cycleLayout:
             tilingController.cycleLayout()
+        case .setLayoutDwindle:
+            tilingController.setLayoutDwindle()
+        case .setLayoutMasterStack:
+            tilingController.setLayoutMasterStack()
+        case .setLayoutAccordion:
+            tilingController.setLayoutAccordion()
+        case .toggleAccordionOrientation:
+            tilingController.toggleAccordionOrientation()
         case .resizeSplit(let delta):
             tilingController.resizeFocusedSplit(delta: delta)
         case .quitHyprArc:

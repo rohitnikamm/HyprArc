@@ -95,6 +95,15 @@ enum TOMLParser {
             default: break
             }
 
+        case "accordion":
+            switch key {
+            case "padding":
+                config.accordion.padding = CGFloat(Double(value) ?? 30)
+            case "orientation":
+                config.accordion.orientation = value
+            default: break
+            }
+
         case "keybindings":
             config.keybindings.bindings[key] = value
 

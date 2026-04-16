@@ -40,7 +40,7 @@ struct MenuBarView: View {
             } label: {
                 spacedLabel(
                     "Layout: \(tilingController.layoutName)",
-                    systemImage: tilingController.layoutName == "Dwindle" ? "arrow.trianglehead.branch" : "sidebar.left"
+                    systemImage: layoutSystemImage(for: tilingController.layoutName)
                 )
             }
 
@@ -88,6 +88,14 @@ struct MenuBarView: View {
     }
 
     /// Build a label with an invisible spacer to match workspace row height.
+    private func layoutSystemImage(for name: String) -> String {
+        switch name {
+        case "Master-Stack": return "sidebar.left"
+        case "Accordion":    return "rectangle.stack"
+        default:             return "arrow.trianglehead.branch"  // Dwindle
+        }
+    }
+
     private func spacedLabel(_ title: String, systemImage: String) -> some View {
         Label {
             let spacer = NSImage(size: NSSize(width: 1, height: 14))

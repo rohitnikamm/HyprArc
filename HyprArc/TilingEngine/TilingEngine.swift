@@ -56,4 +56,12 @@ protocol TilingEngine: Sendable {
     /// Rect + gaps are needed to calculate actual split directions (dwindle determines direction
     /// from aspect ratio at each level, not from stored tree data).
     mutating func resizeSplit(at id: WindowID, delta: CGFloat, axis: SplitDirection?, in rect: CGRect, gaps: GapConfig)
+
+    /// Notify the engine which window is currently focused. Engines that depend on
+    /// focus state (accordion MRU) override this; others inherit the default no-op.
+    mutating func setFocused(_ id: WindowID?)
+}
+
+extension TilingEngine {
+    mutating func setFocused(_ id: WindowID?) {}
 }

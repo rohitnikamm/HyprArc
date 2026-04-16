@@ -228,7 +228,7 @@ private struct GeneralTab: View {
         Form {
             Section("Layout Algorithm") {
                 SlidingPicker(
-                    options: [("Dwindle", "dwindle"), ("Master-Stack", "master-stack")],
+                    options: [("Dwindle", "dwindle"), ("Master-Stack", "master-stack"), ("Accordion", "accordion")],
                     selection: layoutBinding
                 )
             }
@@ -320,8 +320,10 @@ private struct LayoutsTab: View {
     @ObservedObject var configLoader: ConfigLoader
     @State private var splitActive = false
     @State private var masterActive = false
+    @State private var paddingActive = false
     @State private var splitResetTask: DispatchWorkItem?
     @State private var masterResetTask: DispatchWorkItem?
+    @State private var paddingResetTask: DispatchWorkItem?
 
     private var splitRatioBinding: Binding<Double> {
         Binding(
@@ -353,6 +355,30 @@ private struct LayoutsTab: View {
             set: { newValue in
                 DispatchQueue.main.async {
                     configLoader.config.masterStack.orientation = newValue
+                    configLoader.save()
+                }
+            }
+        )
+    }
+
+    private var accordionPaddingBinding: Binding<Double> {
+        Binding(
+            get: { Double(configLoader.config.accordion.padding) },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    configLoader.config.accordion.padding = CGFloat(newValue)
+                    configLoader.save()
+                }
+            }
+        )
+    }
+
+    private var accordionOrientationBinding: Binding<String> {
+        Binding(
+            get: { configLoader.config.accordion.orientation },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    configLoader.config.accordion.orientation = newValue
                     configLoader.save()
                 }
             }
@@ -403,6 +429,30 @@ private struct LayoutsTab: View {
                     selection: orientationBinding
                 )
             }
+
+            Section("Accordion") {
+                LabeledContent {
+                    Slider(value: accordionPaddingBinding, in: 4...100, step: 1)
+                } label: {
+                    Text("Padding — \(Int(configLoader.config.accordion.padding)) px")
+                        .foregroundStyle(paddingActive ? Color.accentColor : .primary)
+                        .fontWeight(paddingActive ? .medium : .regular)
+                        .animation(.easeInOut(duration: 0.15), value: paddingActive)
+                }
+                .onChange(of: configLoader.config.accordion.padding) {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+                    paddingActive = true
+                    paddingResetTask?.cancel()
+                    let task = DispatchWorkItem { paddingActive = false }
+                    paddingResetTask = task
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: task)
+                }
+
+                SlidingPicker(
+                    options: [("Horizontal", "horizontal"), ("Vertical", "vertical")],
+                    selection: accordionOrientationBinding
+                )
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -415,6 +465,25 @@ private struct WindowRulesTab: View {
     @ObservedObject var configLoader: ConfigLoader
     @State private var appListRefresh = false
 
+    /// Rules sorted by workspace ascending, with "Any" (nil) at the bottom;
+    /// secondary sort is bundle ID case-insensitive. Display-only — storage
+    /// order in `configLoader.config.windowRules` is untouched.
+    private var sortedRules: [HyprArcConfig.WindowRule] {
+        configLoader.config.windowRules.sorted { a, b in
+            switch (a.workspace, b.workspace) {
+            case (nil, nil):
+                return a.appID.localizedCaseInsensitiveCompare(b.appID) == .orderedAscending
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            case let (wa?, wb?):
+                if wa != wb { return wa < wb }
+                return a.appID.localizedCaseInsensitiveCompare(b.appID) == .orderedAscending
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if configLoader.config.windowRules.isEmpty {
@@ -426,7 +495,7 @@ private struct WindowRulesTab: View {
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
-                        ForEach(configLoader.config.windowRules) { rule in
+                        ForEach(sortedRules) { rule in
                             if let index = configLoader.config.windowRules.firstIndex(where: { $0.id == rule.id }) {
                                 HStack {
                                     TextField("Bundle ID (e.g. com.spotify.client)",
@@ -631,8 +700,13 @@ private struct KeybindingsTab: View {
             "move-to-workspace-4", "move-to-workspace-5", "move-to-workspace-6",
             "move-to-workspace-7", "move-to-workspace-8", "move-to-workspace-9",
         ]),
+        CommandGroup(title: "Layouts", commands: [
+            "cycle-layout",
+            "layout-dwindle", "layout-master-stack", "layout-accordion",
+            "accordion-toggle-orientation",
+        ]),
         CommandGroup(title: "Other", commands: [
-            "toggle-float", "cycle-layout",
+            "toggle-float",
             "resize-grow", "resize-shrink", "quit",
         ]),
     ]
