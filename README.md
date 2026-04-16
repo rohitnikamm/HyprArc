@@ -1,6 +1,6 @@
 # HyprArc
 
-A dynamic tiling window manager for macOS, inspired by Hyprland. Windows snap into place automatically using a layout algorithm you choose — no manual i3-style tree construction. Three layouts ship today: **Dwindle** (binary spiral), **Master-Stack**, and **Accordion** (MRU peek stack).
+A dynamic tiling window manager for macOS, inspired by Hyprland. Windows snap into place automatically using a layout algorithm you choose — no manual i3-style tree construction. Three layouts so far: **Dwindle**, **Master-Stack**, and **Accordion**.
 
 <img width="1512" height="982" alt="HyprArc screenshot" src="https://github.com/user-attachments/assets/810602f4-95ca-4c00-ae5f-0fd73d6d5176" />
 
