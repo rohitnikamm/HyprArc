@@ -17,3 +17,6 @@ xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Vendored reference — kept on disk for research, not part of HyprArc
+AeroSpace/
