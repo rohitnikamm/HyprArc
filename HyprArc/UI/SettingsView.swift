@@ -211,6 +211,10 @@ struct SettingsView: View {
 
 private struct GeneralTab: View {
     @ObservedObject var configLoader: ConfigLoader
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @AppStorage("welcomeStep") private var welcomeStep: Int = 0
 
     private var layoutBinding: Binding<String> {
         Binding(
@@ -231,6 +235,19 @@ private struct GeneralTab: View {
                     options: [("Dwindle", "dwindle"), ("Master-Stack", "master-stack"), ("Accordion", "accordion")],
                     selection: layoutBinding
                 )
+            }
+
+            Section("Onboarding") {
+                LabeledContent {
+                    Button("Show Welcome") {
+                        welcomeStep = 0
+                        openWindow(id: "welcome")
+                        NSApp.activate(ignoringOtherApps: true)
+                        dismissWindow(id: "settings")
+                    }
+                } label: {
+                    Text("Walk through the HyprArc tour again")
+                }
             }
         }
         .formStyle(.grouped)

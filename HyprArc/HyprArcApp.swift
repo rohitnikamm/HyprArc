@@ -2,13 +2,30 @@ import SwiftUI
 import Combine
 import os
 
+extension Notification.Name {
+    /// Broadcast by AppDelegate once AX is granted and services are running,
+    /// so the SwiftUI layer (which owns `openWindow`) can decide whether to
+    /// show the first-launch onboarding.
+    static let hyprArcServicesDidStart = Notification.Name("hyprArcServicesDidStart")
+}
+
 /// Dedicated view for the menu bar label so @ObservedObject
-/// properly subscribes to TilingController changes.
+/// properly subscribes to TilingController changes. Also observes the
+/// services-started notification to trigger first-launch onboarding.
 struct MenuBarLabel: View {
     @ObservedObject var tilingController: TilingController
 
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+
     var body: some View {
         Text("\(tilingController.activeWorkspaceID)")
+            .onReceive(NotificationCenter.default.publisher(for: .hyprArcServicesDidStart)) { _ in
+                if !hasCompletedOnboarding {
+                    openWindow(id: "welcome")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
     }
 }
 
@@ -32,6 +49,14 @@ struct HyprArcApp: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 650, height: 450)
+        .defaultPosition(.center)
+
+        Window("Welcome to HyprArc", id: "welcome") {
+            WelcomeView(tilingController: appDelegate.tilingController)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .windowLevel(.floating)
         .defaultPosition(.center)
     }
 }
@@ -66,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tilingController.start()
         hotkeyManager.start()
         registerWakeNotifications()
+
+        // Let SwiftUI-side hooks (welcome onboarding trigger) run on next tick
+        // so the scene graph is fully settled before `openWindow` fires.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .hyprArcServicesDidStart, object: nil)
+        }
     }
 
     private func registerWakeNotifications() {

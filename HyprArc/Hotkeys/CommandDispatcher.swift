@@ -1,6 +1,17 @@
 import AppKit
 import Combine
 
+extension Notification.Name {
+    /// Posted when the user triggers focus-direction via hotkey (Opt+H/J/K/L).
+    /// Welcome onboarding Step 2 uses this to confirm actual keyboard practice
+    /// rather than any focus change (which would also fire on mouse clicks).
+    static let hyprArcFocusDirectionPressed = Notification.Name("hyprArcFocusDirectionPressed")
+
+    /// Posted when the user triggers switch-workspace via hotkey (Opt+1…9).
+    /// Welcome onboarding Step 4 uses this for the same reason.
+    static let hyprArcSwitchWorkspacePressed = Notification.Name("hyprArcSwitchWorkspacePressed")
+}
+
 /// All commands that can be triggered by hotkeys.
 enum TilingCommand: Sendable {
     case focusDirection(Direction)
@@ -131,10 +142,12 @@ class CommandDispatcher {
         switch command {
         case .focusDirection(let dir):
             tilingController.focusDirection(dir)
+            NotificationCenter.default.post(name: .hyprArcFocusDirectionPressed, object: nil)
         case .swapDirection(let dir):
             tilingController.swapDirection(dir)
         case .switchWorkspace(let id):
             tilingController.switchToWorkspace(id)
+            NotificationCenter.default.post(name: .hyprArcSwitchWorkspacePressed, object: nil)
         case .moveToWorkspace(let id):
             tilingController.moveWindowToWorkspace(id)
         case .toggleFloat:
