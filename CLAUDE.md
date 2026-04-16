@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 HyprArc is a **dynamic tiling window manager for macOS**, inspired by Hyprland. The key differentiator from AeroSpace (the closest existing macOS WM) is that HyprArc uses **automatic layout algorithms** (dwindle, master-stack) rather than manual i3-style tree construction. Users choose a strategy; HyprArc builds the tree.
 
+## Git commit policy
+
+Do NOT add `Co-Authored-By: Claude` or any similar attribution trailer to commit messages in this repo. Attribute all commits to the user alone. This applies to every commit across every repository owned by this user, including `rohitnikamm/HyprArc` and `rohitnikamm/homebrew-hyprarc`.
+
 ## Build & Run
 
 ```bash
@@ -37,6 +41,31 @@ Bundle ID: `rohit.HyprArc` | Deployment target: macOS | Category: `public.app-ca
 - **scripts/build-dmg.sh**: Full pipeline — archive → Developer ID sign → DMG with Applications symlink → codesign DMG → notarize → staple
 - **Notarization setup** (one-time): `xcrun notarytool store-credentials "HyprArc" --apple-id "..." --team-id "26H5KWS9TD"` (prompts for app-specific password from appleid.apple.com)
 - Output: `build/HyprArc.dmg`
+
+### Homebrew Cask
+
+Users install via:
+```bash
+brew tap rohitnikamm/hyprarc
+brew install --cask hyprarc
+```
+
+- **Tap repo**: [rohitnikamm/homebrew-hyprarc](https://github.com/rohitnikamm/homebrew-hyprarc) (public, MIT). Local checkout at `~/dev/homebrew-hyprarc/`.
+- **Cask file**: `Casks/hyprarc.rb` — bump `version` + `sha256` each release.
+- **Per-release runbook**: [RELEASING.md](RELEASING.md) at HyprArc repo root (10 steps, ~10 min).
+- **Repo visibility**: `rohitnikamm/HyprArc` MUST stay public — brew fetches unauthenticated and gets 404 on private-repo release assets.
+- **Cask `depends_on macos:`**: matches `MACOSX_DEPLOYMENT_TARGET` in the Xcode project (currently `>= :tahoe` for 26.2). Bump when the deployment target moves.
+- **Version source of truth**: `MARKETING_VERSION` in Xcode → same in git tag + cask `version` stanza.
+- **Livecheck**: cask declares `livecheck { url :url; strategy :github_latest }` so `brew livecheck hyprarc` detects staleness automatically.
+
+### Release gotchas (learned v1.0.0)
+
+- **Apple Developer agreement expires silently.** `xcrun notarytool submit` returns `HTTP 403. A required agreement is missing or has expired.` Fix at developer.apple.com/account → accept pending agreements (Account Holder role required). Not surfaced in Xcode at all.
+- **`curl -I` HEAD returns 404 on release assets** even when the asset is fully available. GitHub redirects to Azure blob storage which doesn't support HEAD. Diagnose URL reachability with `curl -L` (GET) or `gh release download` — not `curl -I`.
+- **`brew audit --new --cask` warns "repository not notable enough" for personal taps** — `--new` simulates a PR to the official `homebrew/homebrew-cask` repo (needs ~225 stars / 90 forks / 90 watchers). Use `brew audit --cask` (no `--new`) as the pre-push check for the tap.
+- **SHA-256 must be recomputed after `stapler staple`** — the notarization ticket changes DMG bytes. `build-dmg.sh` staples last, so `shasum -a 256 build/HyprArc.dmg` on the final artifact is correct.
+- **Cask `desc` must not mention the platform** — `brew style` rejects `Cask/Desc: Description shouldn't contain the platform`. Use `"Dynamic tiling window manager"`, not `"... for macOS"`.
+- **`AeroSpace/` at repo root is gitignored** (local reference only, not tracked). CLAUDE.md's "Reference codebase" anchors still useful as documentation even if a fresh clone doesn't have the directory.
 
 ## Build Settings
 
@@ -149,3 +178,4 @@ Full 14-phase plan at `.claude/plans/steady-wishing-clover.md`. Originally built
 - **Feature**: Accordion layout (AeroSpace parity) — new `AccordionLayout` engine with 5-case MRU padding formula, horizontal/vertical orientation, index-cycling `neighbor` (all windows overlap, geometric fails), no-op `resizeSplit` (padding is config-only). Added `setFocused(_:)` to `TilingEngine` protocol with default no-op; `retile()`/`retileFast()` call it before each `calculateFrames`. `cycleLayout` extended to 3-way rotation; new `setLayoutDwindle/MasterStack/Accordion()` + `toggleAccordionOrientation()`. New `[accordion]` TOML section (`padding: 30`, `orientation: "horizontal"`), default keybindings `opt+t` / `opt+m` / `opt+a` / `opt+shift+a`. Menu bar Layout widget uses `rectangle.stack` icon for Accordion. Settings Layouts tab gains an Accordion section with padding slider (4–100 px) and orientation picker; Keybindings tab gains a "Layouts" group. 14 new unit tests in `AccordionLayoutTests.swift`. Workspace-wide (not per-container) — deviation from AeroSpace's tree model, accepted as out of scope. ✅
 - **UI**: Window Rules list sorted by workspace ascending with "Any" (nil) at bottom; secondary alphabetical by bundle ID. Display-only (computed `sortedRules` in `WindowRulesTab`) — TOML storage order untouched. Rows animate to new position when workspace picker changes. ✅
 - **Bugfix**: Remaining windows didn't expand after a sibling was closed — root cause: `kAXUIElementDestroyedNotification` is unreliable and sometimes not delivered (AeroSpace calls this out explicitly). When missed, dead entries lingered in `trackedWindows`, engine tree held a phantom leaf, and `calculateFrames` kept allocating its rect. Fix: added `WindowTracker.pollAliveWindowsAndReconcile()` that queries each tracked pid's `kAXWindowsAttribute` and removes dead entries. Triggered by a global `NSEvent` `.leftMouseUp` monitor (catches red-dot clicks) and `NSWorkspace.activeSpaceDidChangeNotification` (catches native Space switches). Mouse monitor installed in `WindowTracker.start()`, torn down in `stop()`. `TilingController` unchanged — existing `@Published trackedWindows` publisher wires the reconcile through to retile. ✅
+- **Feature**: v1.0.0 public release via Homebrew Cask. Tap at `rohitnikamm/homebrew-hyprarc`; user install `brew tap rohitnikamm/hyprarc && brew install --cask hyprarc`. Added `LICENSE` (MIT), text `README.md` (was image-only — brew acceptance criteria reject info-less homepages), `RELEASING.md` runbook, and `.gitignore` entry for vendored `AeroSpace/` reference. Cask uses `depends_on macos: ">= :tahoe"` (matches `MACOSX_DEPLOYMENT_TARGET = 26.2`), `livecheck` with `:github_latest` strategy, `caveats` explaining the Accessibility grant requirement. Release v1.0.0 verified: notarized, stapled, Gatekeeper-accepted on fresh install, `brew audit --cask` clean. Five release gotchas documented in the Distribution section above (Apple agreement expiry, private-repo 404, curl HEAD 404, `--new` audit scope, SHA-after-stapling). ✅
