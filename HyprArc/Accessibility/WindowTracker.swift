@@ -12,6 +12,7 @@ class WindowTracker: ObservableObject {
 
     private var observers: [pid_t: AXObserver] = [:]
     private var workspaceObservers: [Any] = []
+    private var globalMouseUpMonitor: Any?
     private var debounceWorkItem: DispatchWorkItem?
 
     private let logger = Logger(subsystem: "rohit.HyprArc", category: "WindowTracker")
@@ -33,6 +34,7 @@ class WindowTracker: ObservableObject {
         isStarted = true
         enumerateExistingWindows()
         observeAppLifecycle()
+        installGlobalMouseUpMonitor()
     }
 
     func stop() {
@@ -49,6 +51,11 @@ class WindowTracker: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
         }
         workspaceObservers.removeAll()
+
+        if let monitor = globalMouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        globalMouseUpMonitor = nil
 
         trackedWindows.removeAll()
         focusedWindowID = nil
@@ -121,6 +128,67 @@ class WindowTracker: ObservableObject {
             }
         }
         workspaceObservers.append(activateToken)
+
+        // Native macOS Space change: windows on other Spaces become unreachable
+        // via AX, so reconcile the tracked set. (AeroSpace does the same.)
+        let spaceChangeToken = center.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let tracker = self else { return }
+            Task { @MainActor in
+                tracker.pollAliveWindowsAndReconcile()
+            }
+        }
+        workspaceObservers.append(spaceChangeToken)
+    }
+
+    // MARK: - Alive-window reconcile (AeroSpace parity)
+
+    /// Install a global `.leftMouseUp` monitor that reconciles the tracked
+    /// window set against the live per-app AX window list. macOS's
+    /// `kAXUIElementDestroyedNotification` is unreliable — AeroSpace uses the
+    /// same mouse-up trigger to catch missed close-button clicks (see
+    /// AeroSpace/Sources/AppBundle/GlobalObserver.swift:56-78).
+    private func installGlobalMouseUpMonitor() {
+        globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollAliveWindowsAndReconcile()
+            }
+        }
+    }
+
+    /// For every tracked pid, query the live `kAXWindowsAttribute` and remove
+    /// any tracked entry whose window ID isn't in it. Mutating `trackedWindows`
+    /// fires the existing `@Published` publisher which `TilingController`
+    /// already observes, so retile happens automatically.
+    func pollAliveWindowsAndReconcile() {
+        guard AXIsProcessTrusted(), !AccessibilityHelper.isAXDisabled() else { return }
+        let pids = Set(trackedWindows.values.map { $0.ownerPID })
+        guard !pids.isEmpty else { return }
+
+        var aliveIDs = Set<CGWindowID>()
+        for pid in pids {
+            let app = AXUIElementCreateApplication(pid)
+            for window in app.windows {
+                if let wid = window.windowID {
+                    aliveIDs.insert(wid)
+                }
+            }
+        }
+
+        let dead = Set(trackedWindows.keys).subtracting(aliveIDs)
+        guard !dead.isEmpty else { return }
+
+        for wid in dead {
+            if let info = trackedWindows.removeValue(forKey: wid) {
+                logger.debug("Reconciled dead window: \(info.title) [\(wid)]")
+            }
+        }
+        if let focused = focusedWindowID, trackedWindows[focused] == nil {
+            updateFocusedWindow()
+        }
     }
 
     private func handleAppLaunched(_ app: NSRunningApplication) {
